@@ -1,6 +1,0 @@
-frodo_collect_traces.py is the main code that contains the logic 
-I decided that the capture will happen between the 2 triggers (trigger_high and trgger_low)
-The behaviour of the algorithm is that one trigger_low was firred, then it will terminate
-the code can be run by using the instruction: python3 frodo_collect_traces.py or from
-frodo_experiment.ipynb 
-The results will be saved in: outputs
