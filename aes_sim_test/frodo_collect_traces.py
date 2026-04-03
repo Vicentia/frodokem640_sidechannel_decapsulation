@@ -20,7 +20,7 @@ ins_trace = []
 reg_trace = []
 
 main_addr = None
-frodo_keypair_addr = None
+kem_keypair_addr = None
 trigger_high_addr = None
 trigger_low_addr = None
 skip = None
@@ -138,6 +138,9 @@ def buffers(ql):
         print(f"g_sk_check = 0x{sk_check:08x} ({sk_check})")
 
 
+class StopEmulation(Exception):
+    pass
+
 # Hooks
 def full_tracing(ql: Qiling, address: int, size: int) -> None:
     global hit_main, hit_kem_keypair
@@ -166,8 +169,8 @@ def full_tracing(ql: Qiling, address: int, size: int) -> None:
         hit_main = True
         print(f"main() hit at {hex(address)}")
 
-    if frodo_keypair_addr and address == frodo_keypair_addr and not hit_frodo_keypair:
-        hit_frodo_keypair = True
+    if kem_keypair_addr and address == kem_keypair_addr and not hit_kem_keypair:
+        hit_kem_keypair = True
         address_PK = ql.arch.regs.read("r0")
         address_SK = ql.arch.regs.read("r1")
         print("----------------------------")
@@ -197,6 +200,7 @@ def full_tracing(ql: Qiling, address: int, size: int) -> None:
 
         print("Stop emulator")
         ql.emu_stop()
+        raise StopEmulation("Trace captured, stopping emulator now")
 
 
 if __name__ == "__main__":
@@ -216,7 +220,7 @@ if __name__ == "__main__":
         skip = normalize_addr(trigger_setup)
 
     main_addr = normalize_addr(get_label_address(elf_file, "main"))
-    frodo_keypair_addr = normalize_addr(get_label_address(elf_file, "crypto_frodo_keypair"))
+    kem_keypair_addr = normalize_addr(get_label_address(elf_file, "crypto_kem_keypair"))
     trigger_high_addr = normalize_addr(get_label_address(elf_file, "trigger_high"))
     trigger_low_addr = normalize_addr(get_label_address(elf_file, "trigger_low"))
 
@@ -252,6 +256,8 @@ if __name__ == "__main__":
     print("Running emulator...")
     try:
         ql.run()
+    except StopEmulation as e:
+        print(e)
     except Exception as e:
         print("Error during execution:", e)
         traceback.print_exc()

@@ -1,0 +1,14 @@
+.DS_Store
+.vscode/
+__pycache__/
+venv/
+aes_sim_test/results.txt
+aes_sim_test/output/
+aes_sim_test/firmware/
+aes_sim_test/liboqs-python/
+pqm4-Round3/results1.txt
+pqm4-Round3/benchmarks.csv
+pqm4-Round3/build.log
+pqm4-Round3/obj/
+pqm4-Round3/obj-host/
+pqm4-Round3/elf/
