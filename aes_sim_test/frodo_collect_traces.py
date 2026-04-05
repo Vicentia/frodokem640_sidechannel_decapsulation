@@ -383,7 +383,7 @@ if __name__ == "__main__":
     os.makedirs(current_traces_dir, exist_ok=True)
 
     reset_globals()
-
+    # Initialize Qiling with the STM32F407 environment
     ql = Qiling(
         [elf_file],
         archtype=QL_ARCH.CORTEX_M,
@@ -391,13 +391,14 @@ if __name__ == "__main__":
         env=stm32f407,
         verbose=QL_VERBOSE.OFF
     )
-
+    # Harware setup
     ql.hw.create("usart1")
     ql.hw.create("usart2")
     ql.hw.create("rcc")
     ql.hw.create("gpioa")
 
     try:
+        # Map RNG memory region with read/write permissions (3) to avoid faults when the firmware tries to access it
         ql.mem.map(0x50060800, 0x400, info="RNG", perms=3)
         ql.mem.write(0x50060800, b"\x00" * 0x400)
     except:
