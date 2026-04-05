@@ -11,28 +11,26 @@ volatile uint8_t g_keypair_done = 0;
 volatile uint32_t g_pk_check = 0;
 volatile uint32_t g_sk_check = 0;
 
-static uint32_t simple_sum(const uint8_t *buf, uint32_t len)
-{
-    uint32_t s = 0;
-    for (uint32_t i = 0; i < len; i++) {
-        s += buf[i];
-    }
-    return s;
-}
+// static uint32_t simple_sum(const uint8_t *buf, uint32_t len)
+// {
+//     uint32_t s = 0;
+//     for (uint32_t i = 0; i < len; i++) {
+//         s += buf[i];
+//     }
+//     return s;
+// }
 
 int main(void)
 {
     trigger_setup();
     init_uart();
-    
-    
     crypto_kem_keypair(g_pk, g_sk);
-    g_pk_check = simple_sum(g_pk, CRYPTO_PUBLICKEYBYTES);
-    g_sk_check = simple_sum(g_sk, CRYPTO_SECRETKEYBYTES);
+    // g_pk_check = simple_sum(g_pk, CRYPTO_PUBLICKEYBYTES);
+    // g_sk_check = simple_sum(g_sk, CRYPTO_SECRETKEYBYTES);
     g_keypair_done = 1;
-    // crypto_kem_enc(g_ct, g_ss, g_pk);
-    // crypto_kem_dec(g_ss, g_ct, g_sk);
     trigger_high();
+    //crypto_kem_enc(g_ct, g_ss, g_pk);
+    crypto_kem_dec(g_ss, g_ct, g_sk);
     trigger_low();
 
     while (1) {
