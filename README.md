@@ -1,7 +1,7 @@
 1. Running the file:
    - go to pqm4-Round3/cw-full/firmware/mcu/simpleserial-frodo
    - run the Makefile from the terminal: make PLATFORM=CW308_STM32F4
-   - coppy the elf file that is generated in aes_sim_test/firmware/simpleserial-frodo-CW308_STM32F4.elf by using the instruction: cp <source> <destination> (example: cp /Users/vicentiastroe/Documents/Thesis/FrodoKEM/InitialVersion/pqm4-Round3/cw-full/firmware/mcu/simpleserial-frodo/simpleserial-frodo-CW308_STM32F4.elf /Users/vicentiastroe/Documents/Thesis/FrodoKEM/InitialVersion/aes_sim_test/firmware/simpleserial-frodo-CW308_STM32F4.elf)
+   - copy the elf file that is generated in aes_sim_test/firmware/simpleserial-frodo-CW308_STM32F4.elf by using the instruction: cp <source> <destination> (example: cp /Users/vicentiastroe/Documents/Thesis/FrodoKEM/InitialVersion/pqm4-Round3/cw-full/firmware/mcu/simpleserial-frodo/simpleserial-frodo-CW308_STM32F4.elf /Users/vicentiastroe/Documents/Thesis/FrodoKEM/InitialVersion/aes_sim_test/firmware/simpleserial-frodo-CW308_STM32F4.elf)
    - run the capture traces script by using the Makefile from aes_sim_test with the instruction: make all
    - to clean/delete the traces use: make clean
   
