@@ -3,6 +3,7 @@
 import os
 import csv
 import sys
+import argparse
 import traceback
 
 from qiling.core import Qiling
@@ -18,7 +19,6 @@ PARAMS_LOGQ            = 15
 CRYPTO_CIPHERTEXTBYTES = 9720
 BYTES_CIPHERTEXT_C1    = (PARAMS_LOGQ * PARAMS_N    * PARAMS_NBAR) // 8  
 BYTES_CIPHERTEXT_C2    = (PARAMS_LOGQ * PARAMS_NBAR * PARAMS_NBAR) // 8 
-fault_index = 1
 
 # --------------------------GLOBAL VARIABLES------------------------------
 
@@ -64,6 +64,10 @@ SIZE_CT = 9720
 
 instr_counter = 0
 
+fault_index = 0
+current_result_dir = None
+current_traces_dir = None
+
 REG_NAMES = [
     'r0', 'r1', 'r2', 'r3',
     'r4', 'r5', 'r6', 'r7',
@@ -71,6 +75,27 @@ REG_NAMES = [
     'r12', 'sp', 'lr', 'pc'
 ]
 #---------------------HELPERS FOR CIPHERTEXT------------------------------
+
+
+def reset_globals():
+    global hit_main, hit_kem_keypair, hit_crypto_kem_dec
+    global hit_trigger_high, hit_trigger_low
+    global trace_started, trace_saved, instr_counter
+    global address_PK, address_SK
+    global ins_trace, reg_trace
+
+    hit_main = False
+    hit_kem_keypair = False
+    hit_crypto_kem_dec = False
+    hit_trigger_high = False
+    hit_trigger_low = False
+    trace_started = False
+    trace_saved = False
+    instr_counter = 0
+    address_PK = None
+    address_SK = None
+    ins_trace.clear()
+    reg_trace.clear()
 
 def zero_bits(data, start, D):
     for bit in range(start, start + D):
@@ -112,23 +137,23 @@ def test_modify_ciphertext_c1(index, c1_random=None, ct=None):
 
     # Test 0.1: check lengths
     if len(c1_random) != BYTES_CIPHERTEXT_C1:
-        raise StopEmulation(f"The size of c1_random {len(c1_random)} does not match expected {BYTES_CIPHERTEXT_C1}")
+        raise StopEmulation(f"[ERROR] The size of c1_random {len(c1_random)} does not match expected {BYTES_CIPHERTEXT_C1}")
     # Test 0.2: check lengths
     if len(ct) != CRYPTO_CIPHERTEXTBYTES:
-        raise StopEmulation(f"The size of ct {len(ct)} does not match expected {CRYPTO_CIPHERTEXTBYTES}")
+        raise StopEmulation(f"[ERROR] The size of ct {len(ct)} does not match expected {CRYPTO_CIPHERTEXTBYTES}")
 
     # Test 1: zeroed columns are actually zero
     for ind in range(index):
         for i in range(PARAMS_NBAR):
             val = altered_vals[i * PARAMS_N + ind]
             if val != 0:
-                raise StopEmulation(f"The first {fault_index} columns should be zeroed, but column {ind} row {i} is not zero: {val}")
+                raise StopEmulation(f"[ERROR] The first {fault_index} columns should be zeroed, but column {ind} row {i} is not zero: {val}")
 
     # Test 2: non-zeroed columns are unchanged
     for ind in range(index, PARAMS_N):
         for i in range(PARAMS_NBAR):
             if altered_vals[i * PARAMS_N + ind] != random_vals[i * PARAMS_N + ind]:
-                raise StopEmulation(f"Column {ind} row {i} was changed unexpectedly")
+                raise StopEmulation(f"[ERROR] Column {ind} row {i} was changed unexpectedly")
 
     # Test 3: total_sum - removed_sum == new_sum
     q = 1 << PARAMS_LOGQ
@@ -139,7 +164,9 @@ def test_modify_ciphertext_c1(index, c1_random=None, ct=None):
     new_sum     = sum(altered_vals) % q
     expected    = (total_sum - removed_sum) % q
     if new_sum != expected:
-        raise StopEmulation(f"Sum check failed: {new_sum} != {expected}")
+        raise StopEmulation(f"[ERROR] Sum check failed: {new_sum} != {expected}")
+    
+    print(f"[TEST PASSED] Ciphertext modification for index {index} is correct")
 
 #----------------------HELPERS FOR EMULATOR------------------------------
 def normalize_addr(addr):
@@ -195,24 +222,27 @@ def save_csv(file_name):
     print("Trace saved")
 
 
-def buffers(ql):
-    os.makedirs(f"{output_dir}/results", exist_ok=True)
+def buffers(ql, results_dir):
+    os.makedirs(results_dir, exist_ok=True)
+    #The path for pk and sk should be all teh time the same because they are not changing with the fault index
+    pk_path = f"{output_dir}/pk.bin"
+    sk_path = f"{output_dir}/sk.bin"
 
     if g_pk_addr is not None:
         pk = ql.mem.read(g_pk_addr, SIZE_PK)
-        with open(f"{output_dir}/results/pk.bin", "wb") as f:
+        with open(f"{pk_path}", "wb") as f:
             f.write(pk)
         print("PK saved")
 
     if g_sk_addr is not None:
         sk = ql.mem.read(g_sk_addr, SIZE_SK)
-        with open(f"{output_dir}/results/sk.bin", "wb") as f:
+        with open(f"{sk_path}", "wb") as f:
             f.write(sk)
         print("SK saved")
 
     if g_ct_addr is not None:
         ct = ql.mem.read(g_ct_addr, SIZE_CT)
-        with open(f"{output_dir}/results/ct.bin", "wb") as f:
+        with open(f"{results_dir}/ct.bin", "wb") as f:
             f.write(ct)
         print("CT saved")
 
@@ -232,6 +262,7 @@ def buffers(ql):
 class StopEmulation(Exception):
     pass
 
+
 # Hooks
 def full_tracing(ql: Qiling, address: int, size: int) -> None:
     global hit_main, hit_kem_keypair, hit_crypto_kem_dec
@@ -239,6 +270,7 @@ def full_tracing(ql: Qiling, address: int, size: int) -> None:
     global trace_started, address_PK, address_SK
     global instr_counter
     global skip
+    global fault_index, current_result_dir, current_traces_dir
 
     instr_counter += 1
 
@@ -269,6 +301,7 @@ def full_tracing(ql: Qiling, address: int, size: int) -> None:
         print("----------------------------")
         print(f"pk ptr = {hex(address_PK)}")
         print(f"sk ptr = {hex(address_SK)}")
+        print("----------------------------")
 
     if trigger_high_addr and address == trigger_high_addr and not hit_trigger_high:
         hit_trigger_high = True
@@ -283,7 +316,7 @@ def full_tracing(ql: Qiling, address: int, size: int) -> None:
         print("----------------------------")
         print("Entering decapsulation:")
         print("----------------------------")
-        print(f"ct ptr = {hex(ct_ptr)}  (overwriting with altered ciphertext)")
+        print(f"ct ptr = {hex(ct_ptr)}  (overwriting with altered ciphertext for indedx {fault_index})")
 
         c1_initial, altered_ct = modify_ciphertext_c1(fault_index)
         test_modify_ciphertext_c1(fault_index, c1_random=c1_initial, ct=altered_ct)
@@ -298,8 +331,8 @@ def full_tracing(ql: Qiling, address: int, size: int) -> None:
         hit_trigger_low = True
         print(f"trigger_low() at {hex(address)}")
         print(f"The number of instructions collected: {len(ins_trace)}")
-        buffers(ql)
-        save_csv(f"{output_dir}/traces/trace.csv")
+        buffers(ql, current_result_dir)
+        save_csv(f"{current_traces_dir}/trace_{fault_index}.csv")
 
         print("Stop emulator")
         ql.emu_stop()
@@ -307,8 +340,14 @@ def full_tracing(ql: Qiling, address: int, size: int) -> None:
 
 
 if __name__ == "__main__":
-    elf_file = "firmware/simpleserial-frodo-CW308_STM32F4.elf"
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--fault-index", type=int, required=True)
+    args = parser.parse_args()
+
+    elf_file   = "firmware/simpleserial-frodo-CW308_STM32F4.elf"
     output_dir = "output_decapsulation"
+    fault_index = args.fault_index
+    trace_dir   = f"{output_dir}/TRACE_{fault_index}"
 
     print("Initialisation checks:")
     print("-----------------------")
@@ -317,9 +356,6 @@ if __name__ == "__main__":
 
     if not os.path.exists(elf_file):
         sys.exit(1)
-
-    os.makedirs(f"{output_dir}/traces", exist_ok=True)
-    os.makedirs(f"{output_dir}/results", exist_ok=True)
 
     trigger_setup = get_label_address(elf_file, "trigger_setup")
     if trigger_setup:
@@ -339,6 +375,14 @@ if __name__ == "__main__":
     # g_sk_check_addr = get_label_address(elf_file, "g_sk_check")
 
     stm32f407["PPB"]["type"] = "memory"
+
+    current_result_dir = f"{trace_dir}/results_trace_{fault_index}"
+    current_traces_dir = f"{trace_dir}/traces_{fault_index}"
+
+    os.makedirs(current_result_dir, exist_ok=True)
+    os.makedirs(current_traces_dir, exist_ok=True)
+
+    reset_globals()
 
     ql = Qiling(
         [elf_file],
@@ -371,8 +415,8 @@ if __name__ == "__main__":
         traceback.print_exc()
 
     print("\nSummary:")
-    print(f"main hit         = {hit_main}")
-    print(f"keypair hit      = {hit_kem_keypair}")
-    print(f"trigger_high hit = {hit_trigger_high}")
+    print(f"main hit           = {hit_main}")
+    print(f"keypair hit        = {hit_kem_keypair}")
+    print(f"trigger_high hit   = {hit_trigger_high}")
     print(f"crypto_kem_dec hit = {hit_crypto_kem_dec}")
-    print(f"trigger_low hit  = {hit_trigger_low}")
+    print(f"trigger_low hit    = {hit_trigger_low}")
