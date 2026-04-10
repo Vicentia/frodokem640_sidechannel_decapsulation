@@ -2,7 +2,7 @@ PYTHON      = python3
 
 SCRIPT1     = frodo_collect_traces.py
 SCRIPT2     = frodo_collect_traces_parallel.py
-SCRIPT3     = correlate_traces.py
+SCRIPT3     = correlation_frodo.py
 
 N           = 2
 JOBS        = $(N)

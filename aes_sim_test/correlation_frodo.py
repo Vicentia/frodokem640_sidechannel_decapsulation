@@ -17,6 +17,11 @@ def load_trace(path):
     # Compute the sum of Hamming weights across all registers for each instruction
     return df[REG_NAMES].apply(hw, axis=1).values
 
+def cross_correlation(t0, t1):
+    # Compute the normalized cross-correlation between two traces
+    n = len(t0)
+    return np.correlate(t0 - t0.mean(), t1 - t1.mean(), mode='full')[n-1:] / (t0.std() * t1.std() * n)
+
 if __name__ == "__main__":
 
     t0 = load_trace("output_decapsulation/TRACE_0/traces_0/trace_0.csv")
@@ -34,8 +39,8 @@ if __name__ == "__main__":
     ax1.set_ylabel("HW sum"); ax1.legend()
     
     # Compute and plot the normalized cross-correlation
-    ax2.plot(np.correlate(t0 - t0.mean(), t1 - t1.mean(), mode='full')[n-1:] / (t0.std() * t1.std() * n), lw=0.5, color="green")
-    ax2.set_ylabel("correlation"); ax2.set_xlabel("instruction index")
+    ax2.plot(cross_correlation(t0, t1), lw=0.5, color="green")
+    ax2.set_ylabel("Normalized Cross-Correlation"); ax2.set_xlabel("instruction index")
 
     plt.tight_layout()
     plt.savefig("traces.png", dpi=150)
