@@ -117,7 +117,9 @@ int crypto_kem_enc(uint8_t *ct, uint8_t *ss, const uint8_t *pk) {
 
     sample_n(Sp, PARAMS_N * PARAMS_NBAR);
     sample_n(Bp, PARAMS_N * PARAMS_NBAR);
+    trigger_high();
     mul_add_sa_plus_e(Bp, Sp, pk_seedA);
+    trigger_low();
     pack(ct_c1, (PARAMS_LOGQ * PARAMS_N * PARAMS_NBAR) / 8, Bp, PARAMS_N * PARAMS_NBAR, PARAMS_LOGQ);
 
     // Generate Epp, and compute V = Sp*B + Epp
@@ -182,7 +184,9 @@ int crypto_kem_dec(uint8_t *ss, const uint8_t *ct, const uint8_t *sk) {
     // Compute W = C - Bp*S (mod q), and decode the randomness mu
     unpack(Bp, PARAMS_N * PARAMS_NBAR, ct_c1, (PARAMS_LOGQ * PARAMS_N * PARAMS_NBAR) / 8, PARAMS_LOGQ);
     unpack(C, PARAMS_NBAR * PARAMS_NBAR, ct_c2, (PARAMS_LOGQ * PARAMS_NBAR * PARAMS_NBAR) / 8, PARAMS_LOGQ);
+    trigger_high();
     mul_bs(W, Bp, S);
+    trigger_low();
     sub(W, C, W);
     key_decode((uint16_t *)muprime, W);
 
@@ -202,7 +206,6 @@ int crypto_kem_dec(uint8_t *ss, const uint8_t *ct, const uint8_t *sk) {
     shake128_inc_squeeze((uint8_t *)BBp, PARAMS_N * PARAMS_NBAR * sizeof(uint16_t), &state);
     shake128_inc_squeeze((uint8_t *)W, PARAMS_NBAR * PARAMS_NBAR * sizeof(uint16_t), &state);
     
-
 
     sample_n(Sp, PARAMS_N * PARAMS_NBAR);
     sample_n(BBp, PARAMS_N * PARAMS_NBAR);

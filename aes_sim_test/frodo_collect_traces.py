@@ -74,7 +74,6 @@ REG_NAMES = [
     'r8', 'r9', 'r10', 'r11',
     'r12', 'sp', 'lr', 'pc'
 ]
-#---------------------HELPERS FOR CIPHERTEXT------------------------------
 
 
 def reset_globals():
@@ -97,6 +96,41 @@ def reset_globals():
     ins_trace.clear()
     reg_trace.clear()
 
+# Exeption to stop the emulator 
+class StopEmulation(Exception):
+    pass
+
+#---------------------HELPERS FOR CIPHERTEXT------------------------------
+
+def get_base_ct_path():
+    return os.path.join(output_dir, "ct_base.bin")
+
+
+def generate_base_ciphertext():
+    ct_path = get_base_ct_path()
+    c1_random = os.urandom(BYTES_CIPHERTEXT_C1)
+    c2 = bytes(BYTES_CIPHERTEXT_C2)
+    salt = bytes(CRYPTO_CIPHERTEXTBYTES - BYTES_CIPHERTEXT_C1 - BYTES_CIPHERTEXT_C2)
+
+    base_ct = c1_random + c2+ salt
+    with open(ct_path, "wb") as f:
+        f.write(base_ct)
+    print(f"[INFO] Base ciphertext created at {ct_path}")
+    return base_ct
+
+def load_base_ciphertext():
+    ct_path = get_base_ct_path()
+    if not os.path.exists(ct_path):
+        return generate_base_ciphertext()
+    with open(ct_path, "rb") as f:
+        ct_base = f.read()
+    if len(ct_base) != CRYPTO_CIPHERTEXTBYTES:
+        raise StopEmulation(
+            f"[ERROR] Base ciphertext has wrong size: {len(ct_base)} != {CRYPTO_CIPHERTEXTBYTES}"
+        )
+    print(f"[INFO] Loaded base ciphertext from {ct_path}")
+    return ct_base
+
 def zero_bits(data, start, D):
     for bit in range(start, start + D):
         byte_pos = bit >> 3
@@ -104,14 +138,16 @@ def zero_bits(data, start, D):
         data[byte_pos] &= ~(1 << bit_pos)
 
 def modify_ciphertext_c1(index):
-    c1_random = bytearray(os.urandom(BYTES_CIPHERTEXT_C1))
+    #read ct from ct_base.bin
+    ct_random = load_base_ciphertext()
+    c1_random = ct_random[:BYTES_CIPHERTEXT_C1]
     c1_altered = bytearray(c1_random)  # copy before zeroing 
     for ind in range(index):
         for i in range(PARAMS_NBAR):
             start = (i * PARAMS_N + ind) * PARAMS_LOGQ
             zero_bits(c1_altered, start, PARAMS_LOGQ)
-    c2   = bytes(BYTES_CIPHERTEXT_C2)
-    salt = bytes(CRYPTO_CIPHERTEXTBYTES - BYTES_CIPHERTEXT_C1 - BYTES_CIPHERTEXT_C2)
+    c2   = ct_random[BYTES_CIPHERTEXT_C1:BYTES_CIPHERTEXT_C1 + BYTES_CIPHERTEXT_C2]
+    salt = ct_random[BYTES_CIPHERTEXT_C1 + BYTES_CIPHERTEXT_C2:]
     return bytes(c1_random), bytes(c1_altered) + c2 + salt
 
 def unpack_c1(c1):
@@ -190,6 +226,30 @@ def get_label_address(elf_file, function_name):
     return None
 
 
+#Initialize Qiling with the STM32F407 environment
+def initialize_emulator():
+    ql = Qiling(
+        [elf_file],
+        archtype=QL_ARCH.CORTEX_M,
+        ostype=QL_OS.MCU,
+        env=stm32f407,
+        verbose=QL_VERBOSE.OFF
+    )
+    # Harware setup
+    ql.hw.create("usart1")
+    ql.hw.create("usart2")
+    ql.hw.create("rcc")
+    ql.hw.create("gpioa")
+
+    try:
+        # Map RNG memory region with read/write permissions (3) to avoid faults when the firmware tries to access it
+        ql.mem.map(0x50060800, 0x400, info="RNG", perms=3)
+        ql.mem.write(0x50060800, b"\x00" * 0x400)
+    except:
+        pass
+    return ql
+
+# Disassemble the instruction at the given address and return its mnemonic and operands as a list
 def disasm(ql, address):
     bytecode = ql.mem.read(address, 4)
     for insn in md.disasm(bytecode, address):
@@ -259,8 +319,6 @@ def buffers(ql, results_dir):
     #     print(f"g_sk_check = 0x{sk_check:08x} ({sk_check})")
 
 
-class StopEmulation(Exception):
-    pass
 
 
 # Hooks
@@ -280,7 +338,7 @@ def full_tracing(ql: Qiling, address: int, size: int) -> None:
 
     ins, arg = disasm(ql, address)
 
-    if instr_counter % 100000 == 0:
+    if instr_counter % 10000== 0:
         print(
             f"[PROGRESS] instr={instr_counter} "
             f"pc={hex(address)} sp={hex(ql.arch.regs.read('sp'))} "
@@ -383,28 +441,11 @@ if __name__ == "__main__":
     os.makedirs(current_traces_dir, exist_ok=True)
 
     reset_globals()
-    # Initialize Qiling with the STM32F407 environment
-    ql = Qiling(
-        [elf_file],
-        archtype=QL_ARCH.CORTEX_M,
-        ostype=QL_OS.MCU,
-        env=stm32f407,
-        verbose=QL_VERBOSE.OFF
-    )
-    # Harware setup
-    ql.hw.create("usart1")
-    ql.hw.create("usart2")
-    ql.hw.create("rcc")
-    ql.hw.create("gpioa")
 
-    try:
-        # Map RNG memory region with read/write permissions (3) to avoid faults when the firmware tries to access it
-        ql.mem.map(0x50060800, 0x400, info="RNG", perms=3)
-        ql.mem.write(0x50060800, b"\x00" * 0x400)
-    except:
-        pass
-
+    #Call teh function to initialize the emulator and set up the hooks
+    ql = initialize_emulator()
     ql.hook_code(full_tracing)
+
     print("-----------------------------")
     print("Running emulator...")
     try:
