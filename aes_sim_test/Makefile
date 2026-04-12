@@ -1,18 +1,15 @@
-PYTHON      = python3
-
-SCRIPT1     = frodo_collect_traces.py
-SCRIPT2     = frodo_collect_traces_parallel.py
-SCRIPT3     = correlation_frodo.py
-
-N           = 2
-JOBS        = $(N)
-
-OUTPUT_DIR1 = output_decapsulation
-OUTPUT_DIR2 = output_decapsulation_parallel
-
+PYTHON       = python3
+SCRIPT1      = frodo_collect_traces.py
+SCRIPT2      = frodo_collect_traces_parallel.py
+SCRIPT3      = correlation_frodo.py
+N            = 4
+N_parallel   = 641
+JOBS         = 10
+OUTPUT_DIR1  = output_decapsulation
+OUTPUT_DIR2  = output_decapsulation_parallel
 INDICES := $(shell $(PYTHON) -c "print(' '.join(str(i) for i in range($(N))))")
 
-.PHONY: all all_parallel correlate full clean clean_parallel clean_all
+.PHONY: all all_parallel snapshot_parallel decap_parallel correlation full clean clean_parallel clean_correlation clean_all
 
 all:
 	@for i in $(INDICES); do \
@@ -23,16 +20,28 @@ all:
 	done
 	@echo "All traces have been collected successfully"
 
-all_parallel:
-	@echo "Running $(N) decapsulations in parallel with $(JOBS) workers..."
+# Run just key_generation+decapsulation until mult_bs
+snapshot_parallel:
+	@echo "Running keygen and saving snapshot at crypto_kem_dec entry..."
 	@mkdir -p $(OUTPUT_DIR2)
-	@$(PYTHON) $(SCRIPT2) --n $(N) --jobs $(JOBS) > $(OUTPUT_DIR2)/output_decapsulation_parallel.txt 2>&1
+	@$(PYTHON) $(SCRIPT2) --n 0 > $(OUTPUT_DIR2)/keygen_snapshot_log.txt 2>&1
+	@echo "Snapshot creation completed"
+
+# Run decapsulations only
+decap_parallel:
+	@echo "Running $(N_parallel) decapsulations in parallel with $(JOBS) workers using existing snapshot..."
+	@mkdir -p $(OUTPUT_DIR2)
+	@$(PYTHON) $(SCRIPT2) --n $(N_parallel) --jobs $(JOBS) --skip-snapshot > $(OUTPUT_DIR2)/output_decapsulation_parallel.txt 2>&1
 	@echo "All parallel traces have been collected successfully"
+
+all_parallel: snapshot_parallel decap_parallel
 
 correlation:
 	@echo "Running trace correlation analysis..."
 	@$(PYTHON) $(SCRIPT3)
 	@echo "Correlation analysis completed"
+
+full: all correlation
 
 clean:
 	rm -rf $(OUTPUT_DIR1)
@@ -41,4 +50,7 @@ clean_parallel:
 	rm -rf $(OUTPUT_DIR2)
 
 clean_correlation:
+	rm -rf traces.png
+
+clean_all:
 	rm -rf $(OUTPUT_DIR1) $(OUTPUT_DIR2) traces.png
