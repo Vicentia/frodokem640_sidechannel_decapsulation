@@ -79,7 +79,6 @@ instr_counter = 0
 # ----------------------------- GLOBALS FOR DECAPSULATION ----------------------------
 
 hit_trigger_low = False
-snapshot_ready  = False 
 trace_started   = False
 trace_saved     = False
 address_CT      = None
@@ -101,7 +100,7 @@ def get_trace_csv_path(index):
 
 
 def get_ct_modified_path(index):
-    return os.path.join(get_trace_dir(index), f"ct_modified_{index}.bin")
+    return os.path.join(get_trace_dir(index), "ct_modified.bin")
 
 
 def reset_decapsulation_globals():
@@ -126,6 +125,11 @@ def reset_decapsulation_globals():
 # Exceptions to stop the emulator
 class StopEmulation(Exception):
     pass
+
+
+class SnapshotReady(Exception):
+    pass
+
 
 # --------------------- HELPERS FOR CIPHERTEXT --------------------------
 
@@ -457,7 +461,6 @@ def snapshot_tracing(ql, address, size):
     global hit_main, hit_kem_keypair, hit_trigger_high, hit_crypto_kem_dec
     global instr_counter
     global address_PK, address_SK, address_CT
-    global snapshot_ready
 
     instr_counter += 1
 
@@ -508,8 +511,8 @@ def snapshot_tracing(ql, address, size):
         print(f"crypto_kem_dec() hit at {hex(address)}, ct ptr = {hex(address_CT)}")
         print("Keygen complete. Saving keys and taking snapshot at crypto_kem_dec entry.")
         save_keys(ql, global_output_dir)
-        snapshot_ready = True 
         ql.emu_stop()  # stop cleanly so ql.run() returns without Ctrl+C
+        raise SnapshotReady("Reached crypto_kem_dec — snapshot ready")
 
 
 # Decapsulation tracing from trigger_high to trigger_low
@@ -698,16 +701,12 @@ if __name__ == "__main__":
 
         try:
             ql.run()
+        except SnapshotReady as e:
+            print(e)
         except Exception as e:
             print(f"Error during snapshot run: {e}")
             traceback.print_exc()
             sys.exit(1)
-        
-        if not snapshot_ready: 
-            print("It did not reach the decapsulation phase")
-            sys.exit(1)
-        
-        print("Reached crypto_kem_dec — snapshot ready")
 
         print("\nSnapshot run summary:")
         print(f"  main hit             = {hit_main}")
