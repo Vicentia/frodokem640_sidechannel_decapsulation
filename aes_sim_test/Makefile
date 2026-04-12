@@ -9,9 +9,9 @@ OUTPUT_DIR1  = output_decapsulation
 OUTPUT_DIR2  = output_decapsulation_parallel
 INDICES := $(shell $(PYTHON) -c "print(' '.join(str(i) for i in range($(N))))")
 
-.PHONY: all all_parallel snapshot_parallel decap_parallel correlation full clean clean_parallel clean_correlation clean_all
+.PHONY: all_sequential all_parallel snapshot_parallel decap_parallel clean clean_parallel clean_all
 
-all:
+all_sequantial:
 	@for i in $(INDICES); do \
 		echo "Trace $$i has been initialized"; \
 		mkdir -p $(OUTPUT_DIR1)/TRACE_$$i; \
@@ -36,21 +36,11 @@ decap_parallel:
 
 all_parallel: snapshot_parallel decap_parallel
 
-correlation:
-	@echo "Running trace correlation analysis..."
-	@$(PYTHON) $(SCRIPT3)
-	@echo "Correlation analysis completed"
-
-full: all correlation
-
 clean:
 	rm -rf $(OUTPUT_DIR1)
 
 clean_parallel:
 	rm -rf $(OUTPUT_DIR2)
 
-clean_correlation:
-	rm -rf traces.png
-
 clean_all:
-	rm -rf $(OUTPUT_DIR1) $(OUTPUT_DIR2) traces.png
+	rm -rf $(OUTPUT_DIR1) $(OUTPUT_DIR2) 
