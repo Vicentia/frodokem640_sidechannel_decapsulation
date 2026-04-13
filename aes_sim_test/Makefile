@@ -9,7 +9,7 @@ OUTPUT_DIR1  = output_decapsulation
 OUTPUT_DIR2  = output_decapsulation_parallel
 INDICES := $(shell $(PYTHON) -c "print(' '.join(str(i) for i in range($(N))))")
 
-.PHONY: all_sequential all_parallel snapshot_parallel decap_parallel clean clean_parallel clean_all
+.PHONY: all_sequential all_parallel snapshot_parallel decap_parallel clean clean_parallel capclean_all
 
 all_sequantial:
 	@for i in $(INDICES); do \
