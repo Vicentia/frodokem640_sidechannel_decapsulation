@@ -1,6 +1,6 @@
 # FrodoKEM Trace Collection
 
-A simulation-based side-channel trace collection framework for FrodoKEM-640 decapsulation, running on an emulated STM32F4 target using [Qiling](https://github.com/qilingframework/qiling).
+A simulation-based side-channel trace collection framework for FrodoKEM-640 decapsulation, running on an emulated STM32F4 target using [Qiling](https://github.com/qilingframework/qiling) and the [ChipWisperer enviorment](https://github.com/newaetech/chipwhisperer)
 
 ---
 
