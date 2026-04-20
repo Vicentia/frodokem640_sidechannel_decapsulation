@@ -52,17 +52,8 @@ ELF_FILE        = "firmware/simpleserial-frodo-CW308_STM32F4.elf"
 # -------------------------- PATH HELPERS ---------------------------
 
 # Snapshot lives once at the top level and is shared across all runs
-def get_snapshot_path():
+def get_snapshot_path(output_dir):
     return os.path.join(output_dir, "snapshot.pkl")
-
-
-def get_pk_path():
-    return os.path.join(output_dir, "pk.bin")
-
-
-def get_sk_path():
-    return os.path.join(output_dir, "sk.bin")
-
 
 def get_run_dir(run_index):
     return os.path.join(output_dir, f"Run_{run_index + 1}")
@@ -653,8 +644,11 @@ def run_decapsulation_worker(worker_args):
     skip_addr           = skip_addr_local
     g_ct_addr           = g_ct_addr_local
     clear_bytes_addr    = clear_bytes_addr_local
+
+    output_dir          = output_dir_local
+    output_dir_trim     = output_dir_trim_local
     global_output_dir   = output_dir_local
-    global_output_dir_trim = output_dir_trim_local
+
     md                  = make_disasm()
 
     trace_dir = get_trace_dir(run_index_local, fault_index_local)
@@ -767,7 +761,7 @@ if __name__ == "__main__":
     os.makedirs(output_dir, exist_ok=True)
     os.makedirs(output_dir_trim, exist_ok=True)
 
-    snapshot_path = get_snapshot_path()
+    snapshot_path = get_snapshot_path(output_dir)
 
     print("--------------------------------")
     print("Solving symbol addresses from ELF:")
@@ -840,7 +834,7 @@ if __name__ == "__main__":
             sys.exit(1)
 
     print("-------------------------------")
-    print(f"Starting {num_runs} runs × {len(fault_indices)} fault indices = {total_tasks} tasks")
+    print(f"Starting {num_runs} runs with {len(fault_indices)} fault indices = {total_tasks} tasks")
     print(f"Fault indices per run: {fault_indices}")
     print(f"Parallel workers: {jobs}")
     print("-------------------------------")

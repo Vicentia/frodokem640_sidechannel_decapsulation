@@ -80,7 +80,7 @@ snapshot_sample:
 	@echo "Snapshot done"
 
 decap_sample:
-	@echo "Running $(NUM_RUNS) runs with [$(FAULT_INDICES)] with $(JOBS_SAMPLE) workers..."
+	@echo "Running $(NUM_RUNS) runs with fault indices: [$(FAULT_INDICES)] with $(JOBS_SAMPLE) workers..."
 	@mkdir -p $(OUTPUT_DIR_SAMPLE) $(OUTPUT_DIR_SAMPLE_TRIM)
 	@$(PYTHON) $(SCRIPT_SAMPLE) \
 		--num-runs $(NUM_RUNS) \
