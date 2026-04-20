@@ -1,6 +1,6 @@
 import os
 
-from frodo_collect_traces import check_bp_logic
+from frodo_collect_traces_sequential import check_bp_logic
 
 PARAMS_N    = 640
 PARAMS_NBAR = 8

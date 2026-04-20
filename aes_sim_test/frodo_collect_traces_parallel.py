@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import queue
 import os
 import csv
 import sys
@@ -41,11 +42,12 @@ REG_NAMES = [
 # -------------------------- PATH CONFIGURATION --------------------------
 
 ELF_FILE   = "firmware/simpleserial-frodo-CW308_STM32F4.elf"
-OUTPUT_DIR = "output_decapsulation_parallel"
+# OUTPUT_DIR = "output_decapsulation_parallel"
+# OUTPUT_DIR_TRIM= "output_decapsulation__parallel_TRIM"
 
-PK_PATH      = os.path.join(OUTPUT_DIR, "pk.bin")
-SK_PATH      = os.path.join(OUTPUT_DIR, "sk.bin")
-CT_BASE_PATH = os.path.join(OUTPUT_DIR, "ct_base.bin")
+# PK_PATH      = os.path.join(OUTPUT_DIR, "pk.bin")
+# SK_PATH      = os.path.join(OUTPUT_DIR, "sk.bin")
+# CT_BASE_PATH = os.path.join(OUTPUT_DIR, "ct_base.bin")
 
 # -------------------------- GLOBAL VARIABLES ---------------------------
 
@@ -92,7 +94,7 @@ reg_trace = []
 
 
 def get_trace_dir(index):
-    return os.path.join(OUTPUT_DIR, f"TRACE_{index}")
+    return os.path.join(output_dir, f"TRACE_{index}")
 
 
 def get_trace_csv_path(index):
@@ -100,7 +102,7 @@ def get_trace_csv_path(index):
 
 
 def get_ct_modified_path(index):
-    return os.path.join(get_trace_dir(index), "ct_modified.bin")
+    return os.path.join(get_trace_dir(index), f"ct_modified_{index}.bin")
 
 
 def reset_decapsulation_globals():
@@ -132,9 +134,8 @@ class SnapshotReady(Exception):
 
 
 # --------------------- HELPERS FOR CIPHERTEXT --------------------------
-
 def generate_base_ciphertext():
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
 
     c1_random = os.urandom(BYTES_CIPHERTEXT_C1)
     c2        = bytes(BYTES_CIPHERTEXT_C2)
@@ -175,11 +176,14 @@ def modify_ciphertext_c1(index):
     ct_random  = load_base_ciphertext()
     c1_random  = ct_random[:BYTES_CIPHERTEXT_C1]
     c1_altered = bytearray(c1_random)
-
-    for ind in range(index):
-        for i in range(PARAMS_NBAR):
-            start = (i * PARAMS_N + ind) * PARAMS_LOGQ
-            zero_bits(c1_altered, start, PARAMS_LOGQ)
+    # Don't zero if the index is bigger than PARAMS_N (the number of columns from Bp)
+    if index > PARAMS_N: 
+        print("[INFO] The index is bigger than the number of columns of Bp, so the ciphertext will stay the same")
+    else: 
+        for ind in range(index):
+            for i in range(PARAMS_NBAR):
+                start = (i * PARAMS_N + ind) * PARAMS_LOGQ
+                zero_bits(c1_altered, start, PARAMS_LOGQ)
 
     c2   = ct_random[BYTES_CIPHERTEXT_C1: BYTES_CIPHERTEXT_C1 + BYTES_CIPHERTEXT_C2]
     salt = ct_random[BYTES_CIPHERTEXT_C1 + BYTES_CIPHERTEXT_C2:]
@@ -355,13 +359,30 @@ def setup_qiling_instance(elf_file):
     ql.hw.create("rcc")
     ql.hw.create("gpioa")
 
+    class NonBlockingQueue(queue.Queue):
+        """Returns 0x00 immediately instead of blocking when empty."""
+        def get(self, block=True, timeout=None):
+            try:
+                return super().get(block=False)
+            except queue.Empty:
+                return 0x00
+
     for usart_name in ("usart1", "usart2"):
         try:
             usart = ql.hw.get(usart_name)
-            for _ in range(256):
-                usart.itube.put(0x00)
-        except Exception:
-            pass
+            # Replace the entire queue object
+            old = usart.itube
+            new_q = NonBlockingQueue()
+            # Drain anything already in the old queue into the new one
+            while not old.empty():
+                try:
+                    new_q.put_nowait(old.get_nowait())
+                except queue.Empty:
+                    break
+            usart.itube = new_q
+            print(f"[INFO] Patched {usart_name}.itube with NonBlockingQueue")
+        except Exception as e:
+            print(f"[WARN] Could not patch {usart_name}: {e}")
 
     for hook_type in (
         UC_HOOK_MEM_READ_UNMAPPED,
@@ -438,6 +459,7 @@ def save_csv(file_name):
 
     os.makedirs(os.path.dirname(file_name), exist_ok=True)
 
+    # Full trace: pc, instruction, operands + all registers
     with open(file_name, "w", newline="") as csvfile:
         writer_csv = csv.writer(csvfile)
         writer_csv.writerow([
@@ -448,6 +470,18 @@ def save_csv(file_name):
         for ins_info, regs in zip(ins_trace, reg_trace):
             regs_hex = [hex(x) for x in regs]
             writer_csv.writerow([regs_hex[-1], ins_info[0], ins_info[1]] + regs_hex)
+
+    # Trimmed trace
+    os.makedirs(output_dir_trim, exist_ok=True)
+    trim_file_name = os.path.join(output_dir_trim, f"trace_{fault_index}.csv")
+
+    with open(trim_file_name, "w", newline="") as csvfile_trim:
+        writer_trim = csv.writer(csvfile_trim)
+        writer_trim.writerow(REG_NAMES[:-1]) 
+        for regs in reg_trace:
+            writer_trim.writerow([hex(x) for x in regs[:-1]])  
+
+    print(f"Trimmed trace saved to {trim_file_name}")
 
     trace_saved = True
     print("Trace saved")
@@ -573,14 +607,15 @@ def decapsulation_tracing(ql, address, size):
 
 
 def run_decapsulation_worker(worker_args):
-    (fault_index_local, snapshot_path, elf_file, output_dir,
-     trigger_high_addr_local, trigger_low_addr_local,
+    (fault_index_local, snapshot_path, elf_file, output_dir_local,
+     output_dir_trim_local, trigger_high_addr_local, trigger_low_addr_local,
      skip_addr_local, g_ct_addr_local, clear_bytes_addr_local) = worker_args
 
     global fault_index, current_trace_dir
     global trigger_high_addr, trigger_low_addr
     global skip_addr, g_ct_addr, global_output_dir, md
     global clear_bytes_addr
+    global output_dir, output_dir_trim, ct_base_path
 
     fault_index       = fault_index_local
     trigger_high_addr = trigger_high_addr_local
@@ -588,11 +623,17 @@ def run_decapsulation_worker(worker_args):
     skip_addr         = skip_addr_local
     g_ct_addr         = g_ct_addr_local
     clear_bytes_addr  = clear_bytes_addr_local
+
+    output_dir        = output_dir_local
+    output_dir_trim   = output_dir_trim_local
+    ct_base_path      = os.path.join(output_dir, "ct_base.bin")
     global_output_dir = output_dir
-    md                = make_disasm()
+
+    md = make_disasm()
 
     current_trace_dir = get_trace_dir(fault_index_local)
     os.makedirs(current_trace_dir, exist_ok=True)
+    os.makedirs(output_dir_trim, exist_ok=True)
 
     reset_decapsulation_globals()
 
@@ -603,10 +644,9 @@ def run_decapsulation_worker(worker_args):
     restore_snapshot_manual(ql, snapshot)
     del snapshot
 
-    
     c1_initial, altered_ct = modify_ciphertext_c1(fault_index_local)
     test_modify_ciphertext_c1(fault_index_local, c1_random=c1_initial, ct=altered_ct)
-    # Inject the modified ciphertext into the emulator's memory at g_ct_addr
+
     ql.mem.write(g_ct_addr, bytes(altered_ct))
     print(f"[WORKER {fault_index_local}] Modified CT written to g_ct ({hex(g_ct_addr)})")
 
@@ -636,6 +676,7 @@ def run_decapsulation_worker(worker_args):
 
 # main
 if __name__ == "__main__":
+
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--n",
@@ -643,6 +684,14 @@ if __name__ == "__main__":
         default=0,
         help="Number of decapsulation traces to collect (0 = snapshot only)"
     )
+    parser.add_argument(
+        "--output-dir",
+        required=True, 
+        help="The directory in which the entire trace will be save")
+    parser.add_argument(
+        "--output-dir-trim", 
+        required=True, 
+        help="The directory in which the trim capture will be saved")
     parser.add_argument(
         "--jobs",
         type=int,
@@ -656,13 +705,19 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
+    output_dir      = args.output_dir
+    output_dir_trim = args.output_dir_trim
+    pk_path         = os.path.join(output_dir, "pk.bin")
+    SK_PATH         = os.path.join(output_dir, "sk.bin")
+    CT_BASE_PATH    = os.path.join(output_dir, "ct_base.bin")
+
     elf_file   = ELF_FILE
-    output_dir = OUTPUT_DIR
     N          = args.n
     jobs       = min(args.jobs or max(N, 1), 4)
 
     global_output_dir = output_dir
     os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(output_dir_trim, exist_ok=True)
 
     snapshot_path = os.path.join(output_dir, "snapshot.pkl")
 
@@ -732,7 +787,7 @@ if __name__ == "__main__":
             sys.exit(1)
 
         if N == 0:
-            print("\n Just the snapshot was created")
+            print("\nJust the snapshot was created")
             sys.exit(0)
 
     if N == 0:
@@ -749,6 +804,7 @@ if __name__ == "__main__":
             snapshot_path,
             elf_file,
             output_dir,
+            output_dir_trim,
             trigger_high_addr,
             trigger_low_addr,
             skip_addr,

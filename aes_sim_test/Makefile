@@ -1,46 +1,107 @@
-PYTHON       = python3
-SCRIPT1      = frodo_collect_traces.py
-SCRIPT2      = frodo_collect_traces_parallel.py
-SCRIPT3      = correlation_frodo.py
-N            = 4
-N_parallel   = 641
-JOBS         = 10
-OUTPUT_DIR1  = output_decapsulation
-OUTPUT_DIR2  = output_decapsulation_parallel
+PYTHON            = python3
+SCRIPT_SEQUENTIAL = frodo_collect_traces_sequential.py
+SCRIPT_PARALLEL   = frodo_collect_traces_parallel.py
+SCRIPT_SAMPLE     = frodo_collect_traces_sample.py
+
+# SequEntial 
+N              = 2
+OUTPUT_DIR_SEQUENTIAL= output_decapsulation_sequential
+OUTPUT_DIR__SEQUANTIAL_TRIM = output_decapsulation_sequantial_TRIM
+
+# Parallel 
+N_PARALLEL     = 641
+JOBS_PARALLEL  = 10
+OUTPUT_DIR_PARALLEL    = output_decapsulation_parallel
+OUTPUT_DIR__PARALLEL_TRIM = output_decapsulation_parallel_TRIM
+
+# Sample 
+NUM_RUNS       = 5
+FAULT_INDICES  = 0 1 2 4 8 16 32 64 128 256 512
+JOBS_SAMPLE    = 4
+OUTPUT_DIR_SAMPLE      = output_decapsulation_sample
+OUTPUT_DIR_SAMPLE_TRIM = output_decapsulation_sample_TRIM
+
+#for derivation of the indexes
 INDICES := $(shell $(PYTHON) -c "print(' '.join(str(i) for i in range($(N))))")
 
-.PHONY: all_sequential all_parallel snapshot_parallel decap_parallel clean clean_parallel capclean_all
+.PHONY: all_sequential all_parallel all_sample\
+        snapshot_parallel decap_parallel \
+        snapshot_sample decap_sample \
+        clean clean_parallel clean_sample clean_sequantial
 
-all_sequantial:
+# running sequential
+all_sequential:
 	@for i in $(INDICES); do \
-		echo "Trace $$i has been initialized"; \
-		mkdir -p $(OUTPUT_DIR1)/TRACE_$$i; \
-		$(PYTHON) $(SCRIPT1) --fault-index $$i > $(OUTPUT_DIR1)/TRACE_$$i/output_decapsulation_trace_$$i.txt 2>&1; \
-		echo "Trace $$i has been completed"; \
+		echo "Trace $$i initialised"; \
+		mkdir -p $(OUTPUT_DIR_SEQUENTIAL)/TRACE_$$i; \
+		$(PYTHON) $(SCRIPT_SEQUENTIAL) \
+			--fault-index $$i \
+			--output-dir $(OUTPUT_DIR_SEQUENTIAL) \
+			--output-dir-trim $(OUTPUT_DIR_SEQUENTIAL_TRIM) \
+			> $(OUTPUT_DIR_SEQUENTIAL)/TRACE_$$i/output_decapsulation_trace_$$i.txt 2>&1; \
+		echo "Trace $$i completed"; \
 	done
-	@echo "All traces have been collected successfully"
+	@echo "All sequential traces collected — see $(OUTPUT_DIR_SEQUENTIAL)/"
 
-# Run just key_generation+decapsulation until mult_bs
+# running parallel 
 snapshot_parallel:
-	@echo "Running keygen and saving snapshot at crypto_kem_dec entry..."
-	@mkdir -p $(OUTPUT_DIR2)
-	@$(PYTHON) $(SCRIPT2) --n 0 > $(OUTPUT_DIR2)/keygen_snapshot_log.txt 2>&1
-	@echo "Snapshot creation completed"
+	@echo "Running keygen and saving snapshot..."
+	@mkdir -p $(OUTPUT_DIR_PARALLEL)
+	@$(PYTHON) $(SCRIPT_PARALLEL) \
+		--n 0 \
+		--output-dir $(OUTPUT_DIR_PARALLEL) \
+		--output-dir-trim $(OUTPUT_DIR_PARALLEL_TRIM) \
+		> $(OUTPUT_DIR_PARALLEL)/keygen_snapshot_log.txt 2>&1
+	@echo "Snapshot done"
 
-# Run decapsulations only
 decap_parallel:
-	@echo "Running $(N_parallel) decapsulations in parallel with $(JOBS) workers using existing snapshot..."
-	@mkdir -p $(OUTPUT_DIR2)
-	@$(PYTHON) $(SCRIPT2) --n $(N_parallel) --jobs $(JOBS) --skip-snapshot > $(OUTPUT_DIR2)/output_decapsulation_parallel.txt 2>&1
-	@echo "All parallel traces have been collected successfully"
+	@echo "Running $(N_PARALLEL) decapsulations ($(JOBS_PARALLEL) workers)..."
+	@mkdir -p $(OUTPUT_DIR_PARALLEL) $(OUTPUT_DIR_PARALLEL_TRIM)
+	@$(PYTHON) $(SCRIPT_PARALLEL) \
+		--n $(N_PARALLEL) \
+		--jobs $(JOBS_PARALLEL) \
+		--output-dir $(OUTPUT_DIR_PARALLEL) \
+		--output-dir-trim $(OUTPUT_DIR_PARALLEL_TRIM) \
+		--skip-snapshot \
+		> $(OUTPUT_DIR_PARALLEL)/output_decapsulation_parallel.txt 2>&1
+	@echo "All parallel traces collected — see $(OUTPUT_DIR_PARALLEL)/ and $(OUTPUT_DIR_PARALLEL_TRIM)/"
 
 all_parallel: snapshot_parallel decap_parallel
 
-clean:
-	rm -rf $(OUTPUT_DIR1)
+# running sample
+snapshot_sample:
+	@echo "Running keygen and saving snapshot for sample collection..."
+	@mkdir -p $(OUTPUT_DIR_SAMPLE) $(OUTPUT_DIR_SAMPLE_TRIM)
+	@$(PYTHON) $(SCRIPT_SAMPLE) \
+		--num-runs 0 \
+		--output-dir $(OUTPUT_DIR_SAMPLE) \
+		--output-dir-trim $(OUTPUT_DIR_SAMPLE_TRIM) \
+		> $(OUTPUT_DIR_SAMPLE)/keygen_snapshot_log.txt 2>&1
+	@echo "Snapshot done"
+
+decap_sample:
+	@echo "Running $(NUM_RUNS) runs with [$(FAULT_INDICES)] with $(JOBS_SAMPLE) workers..."
+	@mkdir -p $(OUTPUT_DIR_SAMPLE) $(OUTPUT_DIR_SAMPLE_TRIM)
+	@$(PYTHON) $(SCRIPT_SAMPLE) \
+		--num-runs $(NUM_RUNS) \
+		--fault-indices $(FAULT_INDICES) \
+		--jobs $(JOBS_SAMPLE) \
+		--output-dir $(OUTPUT_DIR_SAMPLE) \
+		--output-dir-trim $(OUTPUT_DIR_SAMPLE_TRIM) \
+		--skip-snapshot \
+		> $(OUTPUT_DIR_SAMPLE)/output_sample.txt 2>&1
+	@echo "All sample traces collected — see $(OUTPUT_DIR_SAMPLE)/ and $(OUTPUT_DIR_SAMPLE_TRIM)/"
+
+all_sample: snapshot_sample decap_sample
+
+# clean
+clean_sequantial:
+	rm -rf $(OUTPUT_DIR_SEQUANTAL) $(OUTPUT_DIR_SEQUENTIAL_TRIM)
 
 clean_parallel:
-	rm -rf $(OUTPUT_DIR2)
+	rm -rf $(OUTPUT_DIR_PARALLEL) $(OUTPUT_DIR_PARALLEL_TRIM)
 
-clean_all:
-	rm -rf $(OUTPUT_DIR1) $(OUTPUT_DIR2) 
+clean_sample:
+	rm -rf $(OUTPUT_DIR_SAMPLE) $(OUTPUT_DIR_SAMPLE_TRIM)
+
+clean_all: clean_sequantial clean_parallel clean_sample
