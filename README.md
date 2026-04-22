@@ -168,24 +168,3 @@ OUTPUT_DIR_SAMPLE_TRIM = output_decapsulation_sample_TRIM
 
 > The snapshot and decapsulation steps are separated so you can regenerate traces without re-running the expensive key generation step — just pass `--skip-snapshot` (handled automatically by the `decap_*` targets).
 
----
-
-#### Output Structure
-
-```
-output_decapsulation_sample/
-├── snapshot.pkl               # Saved emulator state after keygen
-├── pk.bin                     # Public key
-├── sk.bin                     # Secret key
-├── Run_1/
-│   ├── ct_base_run1.bin       # Base ciphertext for this run
-│   └── Trace_0/
-│       ├── trace_0.csv        # Full instruction + register trace
-│       └── ct_modified_0.bin  # Modified ciphertext used in this trace
-├── Run_2/
-│   └── ...
-
-output_decapsulation_sample_TRIM/
-└── Run_1/
-    └── trace_0.csv            # Trimmed trace (register values only, no instructions)
-```
