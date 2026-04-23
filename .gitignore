@@ -12,3 +12,12 @@ pqm4-Round3/build.log
 pqm4-Round3/obj/
 pqm4-Round3/obj-host/
 pqm4-Round3/elf/
+
+# generated outputs
+aes_sim_test/output_decapsulation_parallel/
+aes_sim_test/output_decapsulation_sample/
+aes_sim_test/output_decapsulation_sample_TRIM/
+aes_sim_test/output_decapsulation_sequantial_TRIM/
+aes_sim_test/output_decapsulation_sequential/
+aes_sim_test/Results_decapsulation_parallel/
+aes_sim_test/Results_decapsulation_sample/
