@@ -44,7 +44,7 @@ REG_NAMES = [
 # NUM_RUNS      = 5
 # FAULT_INDICES = [0, 1, 2, 4, 8, 16, 32, 64 , 128, 256, 512]
 
-ELF_FILE        = "firmware/simpleserial-frodo-CW308_STM32F4.elf"
+# ELF_FILE        = "firmware/simpleserial-frodo-CW308_STM32F4.elf"
 # OUTPUT_DIR      = "output_decapsulation_sample"
 # OUTPUT_DIR_TRIM = "output_decapsulation_sample_TRIM"
 
@@ -710,6 +710,12 @@ def run_decapsulation_worker(worker_args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
+        "--elf-file", 
+        type = str,
+        required = True,
+        help="ELF file"
+    )
+    parser.add_argument(
         "--num-runs",
         type=int,
         required= True,
@@ -746,7 +752,7 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    elf_file      = ELF_FILE
+    elf_file      = args.elf_file 
     NUM_RUNS      = args.num_runs
     FAULT_INDICES = args.fault_indices
     output_dir      = args.output_dir
