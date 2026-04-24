@@ -49,11 +49,65 @@ REG_NAMES = [
 # OUTPUT_DIR_TRIM = "output_decapsulation_sample_TRIM"
 
 
-# -------------------------- PATH HELPERS ---------------------------
+# -------------------------- VARIABLES ------------------------------------
 
-# Snapshot lives once at the top level and is shared across all runs
+md = None
+
+# initialization addresses
+main_addr           = None
+trigger_high_addr   = None
+trigger_low_addr    = None
+skip_addrs          = set()
+clear_bytes_addr    = None
+
+# addresses for the key generation
+kem_keypair_addr    = None
+g_pk_addr           = None
+g_sk_addr           = None
+g_keypair_done_addr = None
+
+# address for the ciphertext in the encapsulation/decapsulation function
+g_ct_addr           = None
+crypto_kem_dec_addr = None
+# fallback stop when crypto_kem_dec returns
+dec_return_addr     = None
+
+#flags for debugging 
+hit_main           = False
+hit_kem_keypair    = False
+hit_trigger_high   = False
+hit_crypto_kem_dec = False
+snapshot_saved     = False
+hit_trigger_low    = False
+trace_started      = False
+trace_saved        = False
+# prevents hook re-entrancy after emu_stop() is called
+stop_requested     = False
+
+address_PK = None
+address_SK = None
+address_CT = None
+
+# globals 
+global_output_dir   = None
+output_dir          = None
+output_dir_trim     = None
+snapshot_path       = None
+
+# contors 
+instr_counter = 0
+current_run_index   = 0
+current_fault_index = 0
+
+# instruction and registers initialisation
+ins_trace = []
+reg_trace = []
+
+
+# -------------------------- PATH HELPERS ---------------------------
 def get_snapshot_path(output_dir):
     return os.path.join(output_dir, "snapshot.pkl")
+
 
 def get_run_dir(run_index):
     return os.path.join(output_dir, f"Run_{run_index + 1}")
@@ -74,60 +128,20 @@ def get_ct_modified_path(run_index, fault_index):
 def get_trim_csv_path(run_index, fault_index):
     return os.path.join(output_dir_trim, f"Run_{run_index + 1}", f"trace_{fault_index}.csv")
 
-
 # Per-run base ciphertext path
 def get_ct_base_path(run_index):
     return os.path.join(get_run_dir(run_index), f"ct_base_run{run_index + 1}.bin")
 
 
-# -------------------------- GLOBAL VARIABLES ---------------------------
-
-md = None
-
-clear_bytes_addr    = None
-main_addr           = None
-kem_keypair_addr    = None
-trigger_high_addr   = None
-trigger_low_addr    = None
-crypto_kem_dec_addr = None
-skip_addr           = None
-
-g_pk_addr           = None
-g_sk_addr           = None
-g_ct_addr           = None
-g_keypair_done_addr = None
-
-global_output_dir   = None
-
-hit_main           = False
-hit_kem_keypair    = False
-hit_trigger_high   = False
-hit_crypto_kem_dec = False
-
-address_PK = None
-address_SK = None
-
-instr_counter = 0
-
-# ----------------------------- GLOBALS FOR DECAPSULATION ----------------------------
-
-hit_trigger_low  = False
-trace_started    = False
-trace_saved      = False
-address_CT       = None
-
-current_run_index   = 0
-current_fault_index = 0
-
-ins_trace = []
-reg_trace = []
-
-
+# ---------------------- RESET --------------------
 def reset_decapsulation_globals():
     global hit_crypto_kem_dec, hit_trigger_high, hit_trigger_low
     global trace_started, trace_saved, instr_counter
     global ins_trace, reg_trace, address_CT
+    global dec_return_addr
+    global stop_requested
 
+    stop_requested    = False
     hit_crypto_kem_dec = False
     hit_trigger_high   = False
     hit_trigger_low    = False
@@ -135,18 +149,31 @@ def reset_decapsulation_globals():
     trace_saved        = False
     instr_counter      = 0
     address_CT         = None
+    dec_return_addr    = None
     ins_trace.clear()
     reg_trace.clear()
 
-
+# -------------------- EXCEPTIONS ---------------------
 # Exceptions to stop the emulator
 class StopEmulation(Exception):
     pass
 
-
+# Exceptions to stop the emuulator after the snapshot is ready 
 class SnapshotReady(Exception):
     pass
 
+def hard_stop(ql):
+    # Unicorn stop 
+    try:
+        ql.uc.emu_stop()
+    except Exception:
+        pass
+
+    # Emulator stop 
+    try:
+        ql.emu_stop()
+    except Exception:
+        pass
 
 # --------------------- HELPERS FOR CIPHERTEXT --------------------------
 
@@ -178,7 +205,7 @@ def load_base_ciphertext(run_index):
         ct_base = f.read()
 
     if len(ct_base) != CRYPTO_CIPHERTEXTBYTES:
-        raise ValueError(
+        raise StopEmulation(
             f"[ERROR] Base ciphertext for Run_{run_index + 1} has wrong size: "
             f"{len(ct_base)} != {CRYPTO_CIPHERTEXTBYTES}"
         )
@@ -227,25 +254,25 @@ def unpack_c1(c1):
     return values
 
 
-def test_modify_ciphertext_c1(run_index, index, c1_random=None, ct=None):
+def test_modify_ciphertext_c1(index, c1_random=None, ct=None):
     if c1_random is None or ct is None:
-        c1_random, ct = modify_ciphertext_c1(run_index, index)
-
+        c1_random, ct = modify_ciphertext_c1(index)
     c1_altered = ct[:BYTES_CIPHERTEXT_C1]
 
-    random_vals  = unpack_c1(c1_random)
+    random_vals = unpack_c1(c1_random)
     altered_vals = unpack_c1(c1_altered)
 
+    # Test 0.1: check size of c1
     if len(c1_random) != BYTES_CIPHERTEXT_C1:
         raise StopEmulation(
             f"[ERROR] The size of c1_random {len(c1_random)} does not match expected {BYTES_CIPHERTEXT_C1}"
         )
-
+    # Test 0.2: check size of ct
     if len(ct) != CRYPTO_CIPHERTEXTBYTES:
         raise StopEmulation(
             f"[ERROR] The size of ct {len(ct)} does not match expected {CRYPTO_CIPHERTEXTBYTES}"
         )
-
+    # Test 2: check that the first index columns are zeroed and the rest are unchanged
     for ind in range(index):
         for i in range(PARAMS_NBAR):
             val = altered_vals[i * PARAMS_N + ind]
@@ -254,17 +281,18 @@ def test_modify_ciphertext_c1(run_index, index, c1_random=None, ct=None):
                     f"[ERROR] The first {index} columns should be zeroed, "
                     f"but column {ind} row {i} is not zero: {val}"
                 )
-
+    # Test 3: check that columns from index onward are unchanged
     for ind in range(index, PARAMS_N):
         for i in range(PARAMS_NBAR):
             if altered_vals[i * PARAMS_N + ind] != random_vals[i * PARAMS_N + ind]:
                 raise StopEmulation(
                     f"[ERROR] Column {ind} row {i} was changed unexpectedly"
                 )
-
-    q = 1 << PARAMS_LOGQ
-    total_sum   = sum(random_vals) % q
-    removed_sum = sum(
+            
+    # Test 4: check that the sum of all values in c1 is consistent with the zeroing
+    q            = 1 << PARAMS_LOGQ
+    total_sum    = sum(random_vals) % q
+    removed_sum  = sum(
         random_vals[i * PARAMS_N + ind]
         for ind in range(index)
         for i in range(PARAMS_NBAR)
@@ -275,8 +303,7 @@ def test_modify_ciphertext_c1(run_index, index, c1_random=None, ct=None):
     if new_sum != expected:
         raise StopEmulation(f"[ERROR] Sum check failed: {new_sum} != {expected}")
 
-    print(f"[TEST PASSED] Ciphertext modification for Run_{run_index + 1}, index {index} is correct")
-
+    print(f"[TEST PASSED] Ciphertext modification for index {index} is correct")
 
 # ---------------------- HELPERS FOR EMULATOR ---------------------------
 
@@ -310,7 +337,12 @@ def save_snapshot_manual(ql):
     print(f"Registers saved: {snapshot['regs']}")
 
     SKIP_LABEL_KEYWORDS = [
-        "BITBAND", "BBR", "FLASH", "REMAP", "SYSTEM", "FLASH OTP",
+        "BITBAND",
+        "BBR",
+        "FLASH",
+        "REMAP",
+        "SYSTEM",
+        "FLASH OTP",
     ]
 
     for start, end, perms, label, _ in ql.mem.get_mapinfo():
@@ -322,7 +354,7 @@ def save_snapshot_manual(ql):
             continue
 
         if region_size > 0x400000:
-            print(f"[SKIP LARGE] Region {label}: {hex(start)}-{hex(end)} ({region_size} bytes)")
+            print(f"[SKIP TOO LARGE] Region {label}: {hex(start)}-{hex(end)} ({region_size} bytes)")
             continue
 
         try:
@@ -352,7 +384,8 @@ def restore_snapshot_manual(ql, snapshot):
 
 
 def hook_mem_invalid(uc, access, address, size, value, user_data):
-    return True
+    print(f"[UNMAPPED] access={access} addr={hex(address)} size={size} value={value}")
+    return False
 
 
 def setup_qiling_instance(elf_file):
@@ -371,25 +404,49 @@ def setup_qiling_instance(elf_file):
     ql.hw.create("rcc")
     ql.hw.create("gpioa")
 
-    class NonBlockingQueue(queue.Queue):
-        def get(self, block=True, timeout=None):
-            try:
-                return super().get(block=False)
-            except queue.Empty:
-                return 0x00
+    class DummyInputTube:
+        """
+        Minimal tube-like object expected by Qiling's USART connectivity layer.
+
+        Qiling calls self.itube.readable() before trying to read input.
+        Returning False means: there is no UART input available, so transfer()
+        will not block or crash.
+        """
+        def readable(self):
+            return False
+
+        def read(self, size=1):
+            return bytes([0]) * size
+
+        def write(self, data):
+            return len(data) if data is not None else 0
+
+        def flush(self):
+            pass
 
     for usart_name in ("usart1", "usart2"):
         try:
-            usart = ql.hw.get(usart_name)
-            old   = usart.itube
-            new_q = NonBlockingQueue()
-            while not old.empty():
-                try:
-                    new_q.put_nowait(old.get_nowait())
-                except queue.Empty:
-                    break
-            usart.itube = new_q
-            print(f"[INFO] Patched {usart_name}.itube with NonBlockingQueue")
+            try:
+                usart = ql.hw.get(usart_name)
+            except TypeError:
+                usart = getattr(ql.hw, usart_name, None)
+
+            if usart is None:
+                print(f"[WARN] {usart_name} not available")
+                continue
+
+            try:
+                usart.itube = DummyInputTube()
+                print(f"[INFO] Patched {usart_name}.itube with DummyInputTube")
+            except Exception as e:
+                print(f"[WARN] Could not replace {usart_name}.itube: {e}")
+
+            try:
+                usart.recv_from_user = lambda *args, **kwargs: 0x00
+                print(f"[INFO] Patched {usart_name}.recv_from_user to return 0x00")
+            except Exception as e:
+                print(f"[WARN] Could not patch {usart_name}.recv_from_user: {e}")
+
         except Exception as e:
             print(f"[WARN] Could not patch {usart_name}: {e}")
 
@@ -501,14 +558,22 @@ def save_csv(run_index, fault_index):
 
 # -------------------- SNAPSHOT TRACING HOOK ----------------------------
 
+# Snapshot is taken from the beginning of execution until crypto_kem_dec entry
 def snapshot_tracing(ql, address, size):
     global hit_main, hit_kem_keypair, hit_trigger_high, hit_crypto_kem_dec
     global instr_counter
     global address_PK, address_SK, address_CT
+    global snapshot_saved, snapshot_path
+    global stop_requested
+
+    # Guard: if we already asked to stop, do nothing
+    if stop_requested:
+        return
 
     instr_counter += 1
 
-    if address == skip_addr:
+    if address in skip_addrs:
+        print(f"[SKIP FUNC] Returning immediately from {hex(address)}")
         ql.arch.regs.write("pc", ql.arch.regs.read("lr"))
         return
 
@@ -554,7 +619,19 @@ def snapshot_tracing(ql, address, size):
         print(f"crypto_kem_dec() hit at {hex(address)}, ct ptr = {hex(address_CT)}")
         print("Keygen complete. Saving keys and taking snapshot at crypto_kem_dec entry.")
         save_keys(ql, global_output_dir)
-        ql.emu_stop()
+
+        if not snapshot_saved:
+            snapshot = save_snapshot_manual(ql)
+            print(f"Snapshot dict has {len(snapshot['memory'])} memory regions")
+            print(f"Snapshot regs: {snapshot['regs']}")
+            with open(snapshot_path, "wb") as f:
+                pickle.dump(snapshot, f)
+            snapshot_saved = True
+            print(f"Snapshot saved successfully, file size: {os.path.getsize(snapshot_path)} bytes")
+
+        # Stop Unicorn/Qiling hard before raising so the emulator actually halts.
+        stop_requested = True
+        hard_stop(ql)
         raise SnapshotReady("Reached crypto_kem_dec — snapshot ready")
 
 
@@ -564,10 +641,17 @@ def decapsulation_tracing(ql, address, size):
     global hit_trigger_high, hit_trigger_low
     global trace_started, instr_counter
     global ins_trace, reg_trace
+    global dec_return_addr
+    global stop_requested
+
+    # Guard: if we already asked to stop, do nothing
+    if stop_requested:
+        return
 
     instr_counter += 1
 
-    if address == skip_addr:
+    if address in skip_addrs:
+        print(f"[SKIP FUNC] Returning immediately from {hex(address)}")
         ql.arch.regs.write("pc", ql.arch.regs.read("lr"))
         return
 
@@ -609,8 +693,23 @@ def decapsulation_tracing(ql, address, size):
         print(f"Number of instructions collected: {len(ins_trace)}")
         save_csv(current_run_index, current_fault_index)
         print("Stop emulator")
-        ql.emu_stop()
+
+        # Stop Unicorn/Qiling hard before raising so the emulator actually halts.
+        stop_requested = True
+        hard_stop(ql)
         raise StopEmulation("Trace captured, stopping emulator now")
+
+    # backup stop: return from crypto_kem_dec
+    if dec_return_addr is not None and address == dec_return_addr:
+        print(f"[BACKUP STOP] Returned from crypto_kem_dec to {hex(address)}")
+        if trace_started and not trace_saved:
+            print(f"[BACKUP STOP] Saving partial/full trace with {len(ins_trace)} instructions")
+            save_csv(current_run_index, current_fault_index)
+
+        # Stop Unicorn/Qiling hard before raising so the emulator actually halts.
+        stop_requested = True
+        hard_stop(ql)
+        raise StopEmulation("Returned from crypto_kem_dec")
 
 
 # -------------------- WORKER FOR PARALLEL EXECUTION --------------------
@@ -619,13 +718,13 @@ def run_decapsulation_worker(worker_args):
     (
         run_index_local,
         fault_index_local,
-        snapshot_path,
+        snapshot_path_local,
         elf_file,
         output_dir_local,
-        output_dir_trim_local, 
+        output_dir_trim_local,
         trigger_high_addr_local,
         trigger_low_addr_local,
-        skip_addr_local,
+        skip_addrs_local,
         g_ct_addr_local,
         clear_bytes_addr_local,
     ) = worker_args
@@ -633,15 +732,16 @@ def run_decapsulation_worker(worker_args):
     # Set all module-level globals needed by hooks
     global current_run_index, current_fault_index
     global trigger_high_addr, trigger_low_addr
-    global skip_addr, g_ct_addr, global_output_dir, md
+    global skip_addrs, g_ct_addr, global_output_dir, md
     global clear_bytes_addr
     global output_dir, output_dir_trim
+    global dec_return_addr
 
     current_run_index   = run_index_local
     current_fault_index = fault_index_local
     trigger_high_addr   = trigger_high_addr_local
     trigger_low_addr    = trigger_low_addr_local
-    skip_addr           = skip_addr_local
+    skip_addrs          = set(skip_addrs_local)
     g_ct_addr           = g_ct_addr_local
     clear_bytes_addr    = clear_bytes_addr_local
 
@@ -653,14 +753,21 @@ def run_decapsulation_worker(worker_args):
 
     trace_dir = get_trace_dir(run_index_local, fault_index_local)
     os.makedirs(trace_dir, exist_ok=True)
+    os.makedirs(os.path.dirname(get_trim_csv_path(run_index_local, fault_index_local)), exist_ok=True)
 
     reset_decapsulation_globals()
 
     ql = setup_qiling_instance(elf_file)
 
-    with open(snapshot_path, "rb") as f:
+    with open(snapshot_path_local, "rb") as f:
         snapshot = pickle.load(f)
+
     restore_snapshot_manual(ql, snapshot)
+
+    # fallback stop = address where crypto_kem_dec returns
+    dec_return_addr = normalize_addr(snapshot["regs"]["lr"])
+    print(f"[WORKER run={run_index_local + 1} fault={fault_index_local}] Backup return address = {hex(dec_return_addr)}")
+
     del snapshot
 
     # IMPORTANT: each run has its own base ciphertext now
@@ -691,6 +798,7 @@ def run_decapsulation_worker(worker_args):
 
     print(f"\n-----------------------------")
     print(f"Running decapsulation for Run_{run_index_local + 1}, fault index {fault_index_local}...")
+    print(f"Skip addresses: {[hex(a) for a in sorted(skip_addrs)]}")
 
     try:
         ql.run()
@@ -711,14 +819,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--elf-file", 
-        type = str,
-        required = True,
+        type=str,
+        required=True,
         help="ELF file"
     )
     parser.add_argument(
         "--num-runs",
         type=int,
-        required= True,
+        required=True,
         help="Number of independent runs to collect"
     )
     parser.add_argument(
@@ -761,7 +869,7 @@ if __name__ == "__main__":
     num_runs      = args.num_runs
     fault_indices = args.fault_indices
     total_tasks   = num_runs * len(fault_indices)
-    jobs          = min(args.jobs or total_tasks, 4)
+    jobs          = min(args.jobs or max(total_tasks, 1), 4)
 
     global_output_dir = output_dir
     os.makedirs(output_dir, exist_ok=True)
@@ -772,7 +880,23 @@ if __name__ == "__main__":
     print("--------------------------------")
     print("Solving symbol addresses from ELF:")
     print("--------------------------------")
-    skip_addr           = normalize_addr(get_label_address(elf_file, "trigger_setup"))
+
+    # try ELF first, otherwise use Ghidra-discovered addresses
+    trigger_setup_addr = normalize_addr(get_label_address(elf_file, "trigger_setup"))
+    init_uart_addr     = normalize_addr(get_label_address(elf_file, "init_uart"))
+
+    if trigger_setup_addr is None:
+        trigger_setup_addr = normalize_addr(0x08001964)
+        print(f"[FALLBACK] Using hardcoded trigger_setup address: {hex(trigger_setup_addr)}")
+
+    if init_uart_addr is None:
+        init_uart_addr = normalize_addr(0x080018e8)
+        print(f"[FALLBACK] Using hardcoded init_uart address: {hex(init_uart_addr)}")
+
+    skip_addrs = {
+        a for a in [trigger_setup_addr, init_uart_addr] if a is not None
+    }
+
     clear_bytes_addr    = normalize_addr(get_label_address(elf_file, "clear_bytes"))
     main_addr           = normalize_addr(get_label_address(elf_file, "main"))
     kem_keypair_addr    = normalize_addr(get_label_address(elf_file, "crypto_kem_keypair"))
@@ -784,6 +908,8 @@ if __name__ == "__main__":
     g_sk_addr           = get_label_address(elf_file, "g_sk")
     g_ct_addr           = get_label_address(elf_file, "g_ct")
     g_keypair_done_addr = get_label_address(elf_file, "g_keypair_done")
+
+    print(f"[INFO] Skip addresses = {[hex(a) for a in sorted(skip_addrs)]}")
 
     # Ensure each run has its own base ciphertext
     print("--------------------------------")
@@ -811,6 +937,9 @@ if __name__ == "__main__":
             ql.run()
         except SnapshotReady as e:
             print(e)
+        except StopEmulation as e:
+            print(e)
+            sys.exit(1)
         except Exception as e:
             print(f"Error during snapshot run: {e}")
             traceback.print_exc()
@@ -825,19 +954,13 @@ if __name__ == "__main__":
             print("Did not reach crypto_kem_dec, cannot proceed")
             sys.exit(1)
 
-        print(f"\nSaving snapshot to {snapshot_path}")
-        snapshot = save_snapshot_manual(ql)
-        print(f"Snapshot dict has {len(snapshot['memory'])} memory regions")
-        print(f"Snapshot regs: {snapshot['regs']}")
-
-        try:
-            with open(snapshot_path, "wb") as f:
-                pickle.dump(snapshot, f)
-            print(f"Snapshot saved successfully, file size: {os.path.getsize(snapshot_path)} bytes")
-        except Exception as e:
-            print(f"[ERROR] Failed to save snapshot: {e}")
-            traceback.print_exc()
+        if not os.path.exists(snapshot_path):
+            print(f"[ERROR] Snapshot file was not created at {snapshot_path}")
             sys.exit(1)
+
+    if total_tasks == 0:
+        print("No traces requested. Done.")
+        sys.exit(0)
 
     print("-------------------------------")
     print(f"Starting {num_runs} runs with {len(fault_indices)} fault indices = {total_tasks} tasks")
@@ -856,7 +979,7 @@ if __name__ == "__main__":
             output_dir_trim,
             trigger_high_addr,
             trigger_low_addr,
-            skip_addr,
+            tuple(skip_addrs),
             g_ct_addr,
             clear_bytes_addr,
         )

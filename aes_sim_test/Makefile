@@ -4,7 +4,7 @@ SCRIPT_PARALLEL   = frodo_collect_traces_parallel.py
 SCRIPT_SAMPLE     = frodo_collect_traces_sample.py
 ELF_FILE     	  = firmware/simpleserial-frodo-CW308_STM32F4.elf
 
-# SequEntial 
+# Sequential 
 N              = 2
 OUTPUT_DIR_SEQUENTIAL= output_decapsulation_sequential
 OUTPUT_DIR_SEQUENTIAL_TRIM = output_decapsulation_sequantial_TRIM
@@ -12,7 +12,7 @@ OUTPUT_DIR_SEQUENTIAL_TRIM = output_decapsulation_sequantial_TRIM
 # Parallel 
 N_PARALLEL     = 641
 JOBS_PARALLEL  = 10
-OUTPUT_DIR_PARALLEL    = output_decapsulation_parallel
+OUTPUT_DIR_PARALLEL      = output_decapsulation_parallel
 OUTPUT_DIR_PARALLEL_TRIM = output_decapsulation_parallel_TRIM
 
 # Sample 
@@ -50,6 +50,7 @@ snapshot_parallel:
 	@echo "Running keygen and saving snapshot..."
 	@mkdir -p $(OUTPUT_DIR_PARALLEL)
 	@$(PYTHON) $(SCRIPT_PARALLEL) \
+		--elf-file $(ELF_FILE) \
 		--n 0 \
 		--output-dir $(OUTPUT_DIR_PARALLEL) \
 		--output-dir-trim $(OUTPUT_DIR_PARALLEL_TRIM) \
@@ -60,6 +61,7 @@ decap_parallel:
 	@echo "Running $(N_PARALLEL) decapsulations ($(JOBS_PARALLEL) workers)..."
 	@mkdir -p $(OUTPUT_DIR_PARALLEL) $(OUTPUT_DIR_PARALLEL_TRIM)
 	@$(PYTHON) $(SCRIPT_PARALLEL) \
+		--elf-file $(ELF_FILE) \
 		--n $(N_PARALLEL) \
 		--jobs $(JOBS_PARALLEL) \
 		--output-dir $(OUTPUT_DIR_PARALLEL) \
@@ -98,6 +100,9 @@ decap_sample:
 
 all_sample: snapshot_sample decap_sample
 
+# Running all 
+all: all_sequential all_parallel all_sample
+
 # clean
 clean_sequential:
 	rm -rf $(OUTPUT_DIR_SEQUENTIAL) $(OUTPUT_DIR_SEQUENTIAL_TRIM)
@@ -108,4 +113,4 @@ clean_parallel:
 clean_sample:
 	rm -rf $(OUTPUT_DIR_SAMPLE) $(OUTPUT_DIR_SAMPLE_TRIM)
 
-clean_all: clean_sequantial clean_parallel clean_sample
+clean : clean_sequential clean_parallel clean_sample

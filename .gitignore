@@ -6,6 +6,7 @@ aes_sim_test/results.txt
 aes_sim_test/output/
 aes_sim_test/firmware/
 aes_sim_test/liboqs-python/
+aes_sim_test/vista_utils_ARM.py
 pqm4-Round3/results1.txt
 pqm4-Round3/benchmarks.csv
 pqm4-Round3/build.log

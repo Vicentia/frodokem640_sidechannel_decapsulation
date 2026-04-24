@@ -94,6 +94,7 @@ def get_trace_csv_path(index):
 def get_ct_modified_path(index):
     return os.path.join(get_trace_dir(index), f"ct_modified_{index}.bin")
 
+# ---------------------- RESET --------------------
 def reset_globals():
     global hit_main, hit_kem_keypair, hit_crypto_kem_dec
     global hit_trigger_high, hit_trigger_low
@@ -115,7 +116,7 @@ def reset_globals():
     ins_trace.clear()
     reg_trace.clear()
 
-
+# --------------------- EXCEPTIONS -----------------
 # Exception to stop the emulator
 class StopEmulation(Exception):
     pass
