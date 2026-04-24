@@ -10,6 +10,7 @@ A simulation-based side-channel trace collection framework for FrodoKEM-640 deca
 - [2. Code Explanation](#2-code-explanation)
   - [2.1 Firmware](#21-firmware)
   - [2.2 Capture Code](#22-capture-code)
+- [3. Results](#3-results)
 
 ---
 
@@ -148,7 +149,7 @@ OUTPUT_DIR_SAMPLE_TRIM = output_decapsulation_sample_TRIM
 
 > Each fault index controls how many columns of the C₁ component of the FrodoKEM ciphertext are zeroed out before decapsulation.
 
-The number of traces, the number of jobs, the fault indicies or the outputfiles should all be changed in the Makefile 
+> ⚠️ **Warning:** The number of traces, the number of jobs, the fault indicies or the outputfiles should all be changed in the Makefile 
 
 ---
 
@@ -170,4 +171,6 @@ The number of traces, the number of jobs, the fault indicies or the outputfiles 
 | `make clean ` | Deletes all output directories |
 
 > The snapshot and decapsulation steps are separated so you can regenerate traces without re-running the expensive key generation step — just pass `--skip-snapshot` (handled automatically by the `decap_*` targets).
+
+## 3. Results 
 
