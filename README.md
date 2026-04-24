@@ -54,22 +54,21 @@ cp /Users/vicentiastroe/Documents/Thesis/FrodoKEM/InitialVersion/pqm4-Round3/cw-
 Run the capture script from the `aes_sim_test/` directory using the Makefile:
 
 ```bash
-# Collect traces (sequential, parallel, or sample — see Section 2.2)
+# Collect traces (sequential, parallel, sample or all — see Section 2.2)
 make all_sequential
 make all_parallel
 make all_sample
+make all 
 ```
 
 To clean up generated output:
 
 ```bash
-make clean_all
-```
-
-To run a single trace manually, use the last cell in:
-
-```
-aes_sim_test/frodo_experiment.ipynb
+# Clean traces (sequential, parallel, sample or all)
+make clean_sequential 
+clean_parallel
+clean_sample
+clean
 ```
 
 ---
@@ -86,7 +85,7 @@ aes_sim_test/frodo_experiment.ipynb
 | `hal_stub.c` | RNG logic used by the firmware |
 | `Makefile` | Builds the ELF binary for the STM32F4 target |
 
-The firmware is built using the FrodoKEM API from the `pqm4` repository. The instructions that are **captured** in the trace are those executed between `trigger_high` and `trigger_low`. All other instructions execute normally but are not recorded.
+The firmware is built using the FrodoKEM API from the `pqm4` repository. The instructions that are **captured** in the trace are those executed between `trigger_high` and `trigger_low`. All other instructions execute normally but are not captured.
 
 ---
 
@@ -117,6 +116,7 @@ PYTHON            = python3
 SCRIPT_SEQUENTIAL = frodo_collect_traces_sequential.py
 SCRIPT_PARALLEL   = frodo_collect_traces_parallel.py
 SCRIPT_SAMPLE     = frodo_collect_traces_sample.py
+ELF_FILE     	    = firmware/simpleserial-frodo-CW308_STM32F4.elf
 ```
 
 **Sequential mode** — runs `N` traces one at a time:
@@ -148,6 +148,8 @@ OUTPUT_DIR_SAMPLE_TRIM = output_decapsulation_sample_TRIM
 
 > Each fault index controls how many columns of the C₁ component of the FrodoKEM ciphertext are zeroed out before decapsulation.
 
+The number of traces, the number of jobs, the fault indicies or the outputfiles should all be changed in the Makefile 
+
 ---
 
 #### Makefile Targets
@@ -161,10 +163,11 @@ OUTPUT_DIR_SAMPLE_TRIM = output_decapsulation_sample_TRIM
 | `make snapshot_sample` | Runs keygen and saves snapshot for sample mode |
 | `make decap_sample` | Runs all sample traces (requires snapshot) |
 | `make all_sample` | Runs `snapshot_sample` then `decap_sample` |
+| `make all` | Runs `all_sequential` `all_parallel` `all_sample` |
 | `make clean_sequential` | Deletes sequential output directories |
 | `make clean_parallel` | Deletes parallel output directories |
 | `make clean_sample` | Deletes sample output directories |
-| `make clean_all` | Deletes all output directories |
+| `make clean ` | Deletes all output directories |
 
 > The snapshot and decapsulation steps are separated so you can regenerate traces without re-running the expensive key generation step — just pass `--skip-snapshot` (handled automatically by the `decap_*` targets).
 
