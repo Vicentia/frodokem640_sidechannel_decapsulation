@@ -2,8 +2,7 @@ PYTHON            = python3
 SCRIPT_SEQUENTIAL = frodo_collect_traces_sequential.py
 SCRIPT_PARALLEL   = frodo_collect_traces_parallel.py
 SCRIPT_SAMPLE     = frodo_collect_traces_sample.py
-ELF_FILE     	  = firmware/simpleserial-frodo-CW308_STM32F4.elf
-
+ 
 # Sequential 
 N              = 2
 OUTPUT_DIR_SEQUENTIAL= output_decapsulation_sequential
