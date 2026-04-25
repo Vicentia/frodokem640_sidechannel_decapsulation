@@ -254,24 +254,27 @@ def unpack_c1(c1):
     return values
 
 
-def test_modify_ciphertext_c1(index, c1_random=None, ct=None):
+def test_modify_ciphertext_c1(run_index, index, c1_random=None, ct=None):
     if c1_random is None or ct is None:
-        c1_random, ct = modify_ciphertext_c1(index)
+        c1_random, ct = modify_ciphertext_c1(run_index, index)
+
     c1_altered = ct[:BYTES_CIPHERTEXT_C1]
 
     random_vals = unpack_c1(c1_random)
     altered_vals = unpack_c1(c1_altered)
 
-    # Test 0.1: check size of c1
+    # Test 1.1: check size of c1
     if len(c1_random) != BYTES_CIPHERTEXT_C1:
         raise StopEmulation(
             f"[ERROR] The size of c1_random {len(c1_random)} does not match expected {BYTES_CIPHERTEXT_C1}"
         )
-    # Test 0.2: check size of ct
+
+    # Test 1.2: check size of ct
     if len(ct) != CRYPTO_CIPHERTEXTBYTES:
         raise StopEmulation(
             f"[ERROR] The size of ct {len(ct)} does not match expected {CRYPTO_CIPHERTEXTBYTES}"
         )
+
     # Test 2: check that the first index columns are zeroed and the rest are unchanged
     for ind in range(index):
         for i in range(PARAMS_NBAR):
@@ -288,22 +291,25 @@ def test_modify_ciphertext_c1(index, c1_random=None, ct=None):
                 raise StopEmulation(
                     f"[ERROR] Column {ind} row {i} was changed unexpectedly"
                 )
-            
-    # Test 4: check that the sum of all values in c1 is consistent with the zeroing
-    q            = 1 << PARAMS_LOGQ
-    total_sum    = sum(random_vals) % q
-    removed_sum  = sum(
+
+     # Test 4: check that the sum of all values in c1 is consistent with the zeroing
+    q = 1 << PARAMS_LOGQ
+    total_sum = sum(random_vals) % q
+    removed_sum = sum(
         random_vals[i * PARAMS_N + ind]
         for ind in range(index)
         for i in range(PARAMS_NBAR)
     ) % q
-    new_sum  = sum(altered_vals) % q
+    new_sum = sum(altered_vals) % q
     expected = (total_sum - removed_sum) % q
 
     if new_sum != expected:
         raise StopEmulation(f"[ERROR] Sum check failed: {new_sum} != {expected}")
 
-    print(f"[TEST PASSED] Ciphertext modification for index {index} is correct")
+    print(
+        f"[TEST PASSED] Ciphertext modification for Run_{run_index + 1}, "
+        f"index {index} is correct"
+    )
 
 # ---------------------- HELPERS FOR EMULATOR ---------------------------
 
@@ -821,7 +827,7 @@ if __name__ == "__main__":
         "--elf-file", 
         type=str,
         required=True,
-        help="ELF file"
+        help="Path to the ELF firmware file"
     )
     parser.add_argument(
         "--num-runs",

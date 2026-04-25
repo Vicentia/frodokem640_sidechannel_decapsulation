@@ -2,7 +2,8 @@ PYTHON            = python3
 SCRIPT_SEQUENTIAL = frodo_collect_traces_sequential.py
 SCRIPT_PARALLEL   = frodo_collect_traces_parallel.py
 SCRIPT_SAMPLE     = frodo_collect_traces_sample.py
- 
+ELF_FILE          = firmware/simpleserial-frodo-CW308_STM32F4.elf
+
 # Sequential 
 N              = 2
 OUTPUT_DIR_SEQUENTIAL= output_decapsulation_sequential
@@ -42,7 +43,7 @@ all_sequential:
 			> $(OUTPUT_DIR_SEQUENTIAL)/TRACE_$$i/output_decapsulation_trace_$$i.txt 2>&1; \
 		echo "Trace $$i completed"; \
 	done
-	@echo "All sequential traces collected — see $(OUTPUT_DIR_SEQUENTIAL) and $(OUTPUT_DIR_SEQUANTIAL_TRIM)/"
+	@echo "All sequential traces collected — see $(OUTPUT_DIR_SEQUENTIAL) and $(OUTPUT_DIR_SEQUENTIAL_TRIM)/"
 
 # running parallel 
 snapshot_parallel:

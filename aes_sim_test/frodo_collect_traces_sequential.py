@@ -200,16 +200,17 @@ def test_modify_ciphertext_c1(index, c1_random=None, ct=None):
     random_vals = unpack_c1(c1_random)
     altered_vals = unpack_c1(c1_altered)
 
-    # Test 0.1: check size of c1
+    # Test 1.1: check size of c1
     if len(c1_random) != BYTES_CIPHERTEXT_C1:
         raise StopEmulation(
             f"[ERROR] The size of c1_random {len(c1_random)} does not match expected {BYTES_CIPHERTEXT_C1}"
         )
-    # Test 0.2: check size of ct
+    # Test 1.2: check size of ct
     if len(ct) != CRYPTO_CIPHERTEXTBYTES:
         raise StopEmulation(
             f"[ERROR] The size of ct {len(ct)} does not match expected {CRYPTO_CIPHERTEXTBYTES}"
         )
+    
     # Test 2: check that the first index columns are zeroed and the rest are unchanged
     for ind in range(index):
         for i in range(PARAMS_NBAR):
@@ -464,7 +465,7 @@ if __name__ == "__main__":
         "--elf-file", 
         type = str,
         required = True,
-        help="ELF file"
+        help="Path to the ELF firmware file"
     )
     parser.add_argument(
         "--fault-index",
