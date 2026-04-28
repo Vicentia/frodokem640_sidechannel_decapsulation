@@ -380,13 +380,13 @@ def restore_snapshot_manual(ql, snapshot):
             ql.mem.write(start, data)
             print(f"Restored region [{label}]: {hex(start)}-{hex(end)}")
         except Exception as e:
-            print(f"[WARN] Failed to restore region [{label}] {hex(start)}-{hex(end)}: {e}")
+            print(f"[WARNING] Failed to restore region [{label}] {hex(start)}-{hex(end)}: {e}")
 
     for reg, val in snapshot["regs"].items():
         try:
             ql.arch.regs.write(reg, val)
         except Exception as e:
-            print(f"[WARN] Failed to restore register {reg}: {e}")
+            print(f"[WARNING] Failed to restore register {reg}: {e}")
 
 
 def hook_mem_invalid(uc, access, address, size, value, user_data):
@@ -410,14 +410,7 @@ def setup_qiling_instance(elf_file):
     ql.hw.create("rcc")
     ql.hw.create("gpioa")
 
-    class DummyInputTube:
-        """
-        Minimal tube-like object expected by Qiling's USART connectivity layer.
-
-        Qiling calls self.itube.readable() before trying to read input.
-        Returning False means: there is no UART input available, so transfer()
-        will not block or crash.
-        """
+    class FakeUSART:
         def readable(self):
             return False
 
@@ -438,23 +431,23 @@ def setup_qiling_instance(elf_file):
                 usart = getattr(ql.hw, usart_name, None)
 
             if usart is None:
-                print(f"[WARN] {usart_name} not available")
+                print(f"[WARNING] {usart_name} not available")
                 continue
 
             try:
-                usart.itube = DummyInputTube()
-                print(f"[INFO] Patched {usart_name}.itube with DummyInputTube")
+                usart.itube = FakeUSART()
+                print(f"[INFO] Patched {usart_name}.itube with FakeUSART")
             except Exception as e:
-                print(f"[WARN] Could not replace {usart_name}.itube: {e}")
+                print(f"[WARNING] Could not replace {usart_name}.itube: {e}")
 
             try:
                 usart.recv_from_user = lambda *args, **kwargs: 0x00
                 print(f"[INFO] Patched {usart_name}.recv_from_user to return 0x00")
             except Exception as e:
-                print(f"[WARN] Could not patch {usart_name}.recv_from_user: {e}")
+                print(f"[WARNING] Could not patch {usart_name}.recv_from_user: {e}")
 
         except Exception as e:
-            print(f"[WARN] Could not patch {usart_name}: {e}")
+            print(f"[WARNING] Could not patch {usart_name}: {e}")
 
     for hook_type in (
         UC_HOOK_MEM_READ_UNMAPPED,
@@ -600,7 +593,7 @@ def snapshot_tracing(ql, address, size):
         try:
             ql.mem.write(mem_ptr, b"\x00" * n)
         except Exception as e:
-            print(f"[WARN] clear_bytes({hex(mem_ptr)}, {n}) failed: {e}")
+            print(f"[WARNING] clear_bytes({hex(mem_ptr)}, {n}) failed: {e}")
         ql.arch.regs.write("pc", ql.arch.regs.read("lr"))
         return
 
@@ -677,7 +670,7 @@ def decapsulation_tracing(ql, address, size):
         try:
             ql.mem.write(mem_ptr, b"\x00" * n)
         except Exception as e:
-            print(f"[WARN IN DECAPSULATION] clear_bytes({hex(mem_ptr)}, {n}) failed: {e}")
+            print(f"[WARNING IN DECAPSULATION] clear_bytes({hex(mem_ptr)}, {n}) failed: {e}")
         ql.arch.regs.write("pc", ql.arch.regs.read("lr"))
         return
 

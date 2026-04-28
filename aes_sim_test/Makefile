@@ -12,7 +12,7 @@ OUTPUT_DIR_SEQUENTIAL_TRIM = output_decapsulation_sequential_TRIM
 # Parallel 
 N_PARALLEL = 641
 JOBS_PARALLEL = 10
-OUTPUT_DIR_PARALLEL      = output_decapsulation_parallel 
+OUTPUT_DIR_PARALLEL      = output_decapsulation_parallel
 OUTPUT_DIR_PARALLEL_TRIM = output_decapsulation_parallel_TRIM
 
 # Sample 
