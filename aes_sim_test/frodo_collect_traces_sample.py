@@ -565,7 +565,7 @@ def snapshot_tracing(ql, address, size):
     global snapshot_saved, snapshot_path
     global stop_requested
 
-    # Guard: if we already asked to stop, do nothing
+    # if we already asked to stop, do nothing
     if stop_requested:
         return
 
