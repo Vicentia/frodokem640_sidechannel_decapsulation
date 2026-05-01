@@ -1,6 +1,6 @@
 # FrodoKEM Trace Collection
 
-A simulation-based side-channel trace collection framework for FrodoKEM-640 decapsulation, running on an emulated STM32F4 target using [Qiling](https://github.com/qilingframework/qiling) and the [ChipWisperer enviorment](https://github.com/newaetech/chipwhisperer)
+FrodoKEM-640 decapsulation traces, captured by using STM32F4 target, [Qiling](https://github.com/qilingframework/qiling) and [ChipWisperer enviorment](https://github.com/newaetech/chipwhisperer)
 
 ---
 
@@ -303,6 +303,7 @@ All plots are saved to the relevant results directory (e.g. `Results_decapsulati
 | `standard_deviation_all_traces.png` | Standard deviation for all traces|
 | `hw_and_hd_traces_comparison.png` | HW and HD between 2 selected traces |
 | `pointwise_difference.png` | Point-wise difference between 2 traces |
+| `correlation_between_<i>_<j>.png` | Cross-correlation between trace_i and trace_j |
 | `correlation_between_pairs.png` | Cross-correlation between more pairs of 2 traces on top of each other to see the difference |
 | `snr_HW_combined.png` | All HW SNR for multiple indices |
 | `snr_HD_combined.png` | All HD SNR for multiple indices  |
