@@ -193,8 +193,7 @@ OUTPUT_DIR_TRUNCATED_TRIM = output_decapsulation_truncated_TRIM
 | `make clean_sample` | Deletes sample output directories |
 | `make clean ` | Deletes all output directories |
 
-> The snapshot and decapsulation steps are separated so you can regenerate traces without re-running the expensive key generation step — just pass `--skip-snapshot` (handled automatically by the `decap_*` targets).
-
+> The snapshot and decapsulation steps are separated so you can regenerate traces without re-running the key generation that takes a lot (around 30 minutes)
 ### 2.3 Code Output 
 
 #### 2.3.1 Sequential
