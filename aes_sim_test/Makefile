@@ -2,6 +2,7 @@ PYTHON            = python3
 SCRIPT_SEQUENTIAL = frodo_collect_traces_sequential.py
 SCRIPT_PARALLEL   = frodo_collect_traces_parallel.py
 SCRIPT_SAMPLE     = frodo_collect_traces_sample.py
+SCRIPT_TRUNCATED  = frodo_collect_traces_truncated.py
 ELF_FILE          = firmware/simpleserial-frodo-CW308_STM32F4.elf
 
 # Sequential 
@@ -18,17 +19,26 @@ OUTPUT_DIR_PARALLEL_TRIM = output_decapsulation_parallel_TRIM
 # Sample 
 NUM_RUNS = 5
 FAULT_INDICES = 0 1 2 4 8 16 32 64 128 256 512
-JOBS_SAMPLE = 4
+JOBS_SAMPLE = 10
 OUTPUT_DIR_SAMPLE      = output_decapsulation_sample
 OUTPUT_DIR_SAMPLE_TRIM = output_decapsulation_sample_TRIM
+
+# Truncated 
+NUM_RUNS_TRUNCATED        = 80 
+FAULT_INDICES_TRUNCATED   = 0
+JOBS_TRUNCATED            = 10
+OUTPUT_DIR_TRUNCATED      = output_decapsulation_truncated
+OUTPUT_DIR_TRUNCATED_TRIM = output_decapsulation_truncated_TRIM
+
 
 # for derivation of the indexes
 INDICES := $(shell $(PYTHON) -c "print(' '.join(str(i) for i in range($(N))))")
 
-.PHONY: all all_sequential all_parallel all_sample \
+.PHONY: all all_sequential all_parallel all_sample all_truncated \
         snapshot_parallel decap_parallel \
         snapshot_sample decap_sample \
-        clean clean_parallel clean_sample clean_sequential clean_all
+		snapshot_truncated decap_truncated \
+        clean clean_parallel clean_sample clean_sequential clean_truncated clean_all
 
 # running sequential
 all_sequential:
@@ -79,6 +89,7 @@ all_parallel:
 	@echo "Parallel run started..."
 	@echo "-----------------------"
 	@$(MAKE) snapshot_parallel
+	@echo "Snapshot captured, decapsulation starts"
 	@$(MAKE) decap_parallel
 	@echo "------------------"
 	@echo "Parallel run ended."
@@ -113,12 +124,47 @@ all_sample:
 	@echo "Sample run started..."
 	@echo "-------------------"
 	@$(MAKE) snapshot_sample
+	@echo "Snapshot captured, decapsulation starts"
 	@$(MAKE) decap_sample
 	@echo "----------------"
 	@echo "Sample run ended."
 
+snapshot_truncated:
+	@echo "Running keygen and saving snapshot for truncated version..."
+	@mkdir -p $(OUTPUT_DIR_TRUNCATED) $(OUTPUT_DIR_TRUNCATED_TRIM)
+	@$(PYTHON) $(SCRIPT_TRUNCATED) \
+		--elf-file $(ELF_FILE) \
+		--num-runs 0 \
+		--output-dir $(OUTPUT_DIR_TRUNCATED) \
+		--output-dir-trim $(OUTPUT_DIR_TRUNCATED_TRIM) \
+		> $(OUTPUT_DIR_TRUNCATED)/keygen_snapshot_log.txt 2>&1
+	@echo "Snapshot done"
+
+decap_truncated:
+	@echo "Running $(NUM_RUNS_TRUNCATED) runs with fault indices: [$(FAULT_INDICES_TRUNCATED)] with $(JOBS_SAMPLE) workers..."
+	@mkdir -p $(OUTPUT_DIR_TRUNCATED) $(OUTPUT_DIR_TRUNCATED_TRIM)
+	@$(PYTHON) $(SCRIPT_TRUNCATED) \
+		--elf-file $(ELF_FILE) \
+		--num-runs $(NUM_RUNS_TRUNCATED) \
+		--fault-indices $(FAULT_INDICES_TRUNCATED) \
+		--jobs $(JOBS_TRUNCATED) \
+		--output-dir $(OUTPUT_DIR_TRUNCATED) \
+		--output-dir-trim $(OUTPUT_DIR_TRUNCATED_TRIM) \
+		--skip-snapshot \
+		> $(OUTPUT_DIR_TRUNCATED)/output_sample.txt 2>&1
+	@echo "All truncated traces collected — see $(OUTPUT_DIR_TRUNCATED) and $(OUTPUT_DIR_TRUNCATED_TRIM)"
+
+all_truncated:
+	@echo "Truncated run started..."
+	@echo "-------------------"
+	@$(MAKE) snapshot_truncated
+	@echo "Snapshot captured, decapsulation starts"
+	@$(MAKE) decap_truncated
+	@echo "----------------"
+	@echo "Truncated run ended."
+
 # Running all 
-all: all_sequential all_parallel all_sample
+all: all_sequential all_parallel all_sample all_truncated 
 
 # clean
 clean_sequential:
@@ -130,6 +176,7 @@ clean_parallel:
 clean_sample:
 	rm -rf $(OUTPUT_DIR_SAMPLE) $(OUTPUT_DIR_SAMPLE_TRIM)
 
-clean: clean_sequential clean_parallel clean_sample
+clean_truncated: 
+		rm -rf $(OUTPUT_DIR_TRUNCATED) $(OUTPUT_DIR_TRUNCATED_TRIM)
 
-clean_all: clean
+clean: clean_sequential clean_parallel clean_sample clean_truncated

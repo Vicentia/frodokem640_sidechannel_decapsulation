@@ -35,7 +35,7 @@ REG_NAMES = [
 
 # ELF_FILE   = "firmware/simpleserial-frodo-CW308_STM32F4.elf"
 # OUTPUT_DIR = "output_decapsulation_sequantial"
-# OUTPUT_DIR_TRIM= "output_decapsulation_sequentially_TRIM"
+# OUTPUT_DIR_TRIM = "output_decapsulation_sequentially_TRIM"
 
 # PK_PATH      = os.path.join(OUTPUT_DIR, "pk.bin")
 # SK_PATH      = os.path.join(OUTPUT_DIR, "sk.bin")
@@ -418,7 +418,7 @@ def full_tracing(ql: Qiling, address: int, size: int) -> None:
         print("----------------------------")
 
     # Save PK/SK as soon as keypair generation is done (detected at trigger_high,
-    # which fires right before the decapsulation measurement window begins).
+    # which fires right before the decapsulation measurement window begins)
     if trigger_high_addr and address == trigger_high_addr and not hit_trigger_high:
         hit_trigger_high = True
         save_keypair(ql)       

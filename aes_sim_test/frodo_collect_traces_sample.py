@@ -755,7 +755,6 @@ def run_decapsulation_worker(worker_args):
     os.makedirs(os.path.dirname(get_trim_csv_path(run_index_local, fault_index_local)), exist_ok=True)
 
     reset_decapsulation_globals()
-
     ql = setup_qiling_instance(elf_file)
 
     with open(snapshot_path_local, "rb") as f:
@@ -763,13 +762,13 @@ def run_decapsulation_worker(worker_args):
 
     restore_snapshot_manual(ql, snapshot)
 
-    # fallback stop = address where crypto_kem_dec returns
+    # address where crypto_kem_dec returns
     dec_return_addr = normalize_addr(snapshot["regs"]["lr"])
     print(f"[WORKER run={run_index_local + 1} fault={fault_index_local}] Backup return address = {hex(dec_return_addr)}")
 
     del snapshot
 
-    # IMPORTANT: each run has its own base ciphertext now
+    # each run has its own base ciphertext 
     c1_initial, altered_ct = modify_ciphertext_c1(run_index_local, fault_index_local)
     test_modify_ciphertext_c1(
         run_index_local,
@@ -780,9 +779,10 @@ def run_decapsulation_worker(worker_args):
 
     ql.mem.write(g_ct_addr, bytes(altered_ct))
     print(
-        f"[WORKER run={run_index_local + 1} fault={fault_index_local}] "
+        f"[WORKER run={run_index_local} fault={fault_index_local}] "
         f"Modified CT written to g_ct ({hex(g_ct_addr)})"
     )
+
 
     ct_path = get_ct_modified_path(run_index_local, fault_index_local)
     os.makedirs(os.path.dirname(ct_path), exist_ok=True)
@@ -880,17 +880,8 @@ if __name__ == "__main__":
     print("Solving symbol addresses from ELF:")
     print("--------------------------------")
 
-    # try ELF first, otherwise use Ghidra-discovered addresses
     trigger_setup_addr = normalize_addr(get_label_address(elf_file, "trigger_setup"))
     init_uart_addr     = normalize_addr(get_label_address(elf_file, "init_uart"))
-
-    if trigger_setup_addr is None:
-        trigger_setup_addr = normalize_addr(0x08001964)
-        print(f"[FALLBACK] Using hardcoded trigger_setup address: {hex(trigger_setup_addr)}")
-
-    if init_uart_addr is None:
-        init_uart_addr = normalize_addr(0x080018e8)
-        print(f"[FALLBACK] Using hardcoded init_uart address: {hex(init_uart_addr)}")
 
     skip_addrs = {
         a for a in [trigger_setup_addr, init_uart_addr] if a is not None
@@ -912,7 +903,7 @@ if __name__ == "__main__":
 
     # Ensure each run has its own base ciphertext
     print("--------------------------------")
-    print("Preparing per-run base ciphertexts:")
+    print("Preparing base ciphertexts:")
     print("--------------------------------")
     for run_index in range(num_runs):
         load_base_ciphertext(run_index)
@@ -967,7 +958,6 @@ if __name__ == "__main__":
     print(f"Parallel workers: {jobs}")
     print("-------------------------------")
 
-    # Build all (run_index, fault_index) pairs
     worker_args = [
         (
             run_index,
