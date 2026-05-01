@@ -16,6 +16,8 @@ A simulation-based side-channel trace collection framework for FrodoKEM-640 deca
     - [2.3.3 Sample](#233-sample)
     - [2.3.4 Truncated](#234-truncated)
 - [3. Results](#3-results)
+  - [3.1 Creating the Leackage Models](#31-creating-the-leackage-models)
+  - [3.1 Plots](#32-plots)
 
 ---
 
@@ -270,4 +272,42 @@ A trimmed version of each trace is saved to `output_decapsulation_truncated_TRIM
 ---
  
 ## 3. Results 
+
+### 3.1 Creating the Leackage Models 
+
+**Source:** `create_simulation_traces.ipynb` 
+
+This notebook loads the collected execution traces, converts them into simulated power traces using leakage models (HW or HD), and runs a analysis on them. 
+
+The output files are
+
+| File | Description |
+|---|---|
+| `Results_decapsulation_parallel/RESULTS_HW.npy` | All HW traces in one array |
+| `Results_decapsulation_parallel/RESULTS_HD.npy` | All HD traces in one array|
+| `Results_decapsulation_sample/HW_trace_<j>.npy` | HW traces grouped by fault index `j` (sample mode) |
+| `Results_decapsulation_sample/HD_trace_<j>.npy` | HD traces grouped by fault index `j` (sample mode) |
+| `Results_decapsulation_truncated/HW_SUBTRACE_xs<j>.npy` | HW traces grouped by dot product index `j` (truncated mode) |
+| `Results_decapsulation_truncated/HD_SUBTRACE_xs<j>.npy` | HD traces grouped by dot product index `j` (truncated mode) |
+
+---
+
+### 3.2 Plots
+
+All plots are saved to the relevant results directory (e.g. `Results_decapsulation_parallel/`).
+
+| Output file | What it shows |
+|---|---|
+| `traces_plot.png` | A plot with all the traces |
+| `variance_all_traces.png` | Variance for all the traces|
+| `standard_deviation_all_traces.png` | Standard deviation for all traces|
+| `hw_and_hd_traces_comparison.png` | HW and HD between 2 selected traces |
+| `pointwise_difference.png` | Point-wise difference between 2 traces |
+| `correlation_between_2_traces.png` | Cross-correlation between more pairs of 2 traces on top of each other to see the difference |
+| `snr_HW_<i>_<j>.png` | SNR between the unmodified trace (index `0`) and the trace with fault index `j` for HW |
+| `snr_HD_<i>_<j>.png` | SNR between the unmodified trace (index `0`) and the trace with fault index `j` for HD |
+| `snr_HW_combined.png` | All HW SNR for multiple indices |
+| `snr_HD_combined.png` | All HD SNR for multiple indices  |
+| `trace_with_arithmetic.png` | HW and HD with points when an arithmetic operation is hit |
+
 
