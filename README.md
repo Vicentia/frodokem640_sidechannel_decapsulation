@@ -303,7 +303,7 @@ All plots are saved to the relevant results directory (e.g. `Results_decapsulati
 | `standard_deviation_all_traces.png` | Standard deviation for all traces|
 | `hw_and_hd_traces_comparison.png` | HW and HD between 2 selected traces |
 | `pointwise_difference.png` | Point-wise difference between 2 traces |
-| `correlation_between_2_traces.png` | Cross-correlation between more pairs of 2 traces on top of each other to see the difference |
+| `correlation_correlation_between_pairs.png` | Cross-correlation between more pairs of 2 traces on top of each other to see the difference |
 | `snr_HW_<i>_<j>.png` | SNR between the unmodified trace (index `0`) and the trace with fault index `j` for HW |
 | `snr_HD_<i>_<j>.png` | SNR between the unmodified trace (index `0`) and the trace with fault index `j` for HD |
 | `snr_HW_combined.png` | All HW SNR for multiple indices |
