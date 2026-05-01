@@ -141,7 +141,7 @@ snapshot_truncated:
 	@echo "Snapshot done"
 
 decap_truncated:
-	@echo "Running $(NUM_RUNS_TRUNCATED) runs with fault indices: [$(FAULT_INDICES_TRUNCATED)] with $(JOBS_SAMPLE) workers..."
+	@echo "Running $(NUM_RUNS_TRUNCATED) runs with fault indices: [$(FAULT_INDICES_TRUNCATED)] with $(JOBS_TRUNCATED) workers..."
 	@mkdir -p $(OUTPUT_DIR_TRUNCATED) $(OUTPUT_DIR_TRUNCATED_TRIM)
 	@$(PYTHON) $(SCRIPT_TRUNCATED) \
 		--elf-file $(ELF_FILE) \

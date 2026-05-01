@@ -217,7 +217,7 @@ def test_modify_ciphertext_c1(index, c1_random=None, ct=None):
             val = altered_vals[i * PARAMS_N + ind]
             if val != 0:
                 raise StopEmulation(
-                    f"[ERROR] The first {fault_index} columns should be zeroed, "
+                    f"[ERROR] The first {index} columns should be zeroed, "
                     f"but column {ind} row {i} is not zero: {val}"
                 )
     # Test 3: check that columns from index onward are unchanged
