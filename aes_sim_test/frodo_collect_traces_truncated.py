@@ -27,6 +27,8 @@ PARAMS_LOGQ            = 15
 CRYPTO_CIPHERTEXTBYTES = 9720
 BYTES_CIPHERTEXT_C1    = (PARAMS_LOGQ * PARAMS_N * PARAMS_NBAR) // 8
 BYTES_CIPHERTEXT_C2    = (PARAMS_LOGQ * PARAMS_NBAR * PARAMS_NBAR) // 8
+
+# sk lengths 
 s_length               = 16
 SEED_A_length          = 16 
 b_length               = 9600 
@@ -531,9 +533,9 @@ def save_keys(ql, out_dir):
             f.write(sk)
         S_path = os.path.join(out_dir, "S.csv")
         save_S_from_sk_csv(sk, S_path)
-
+        
         print(f"SK saved to {sk_path}")
-        print(f"S has been extracted to {S_path}")
+        print(f"S saved to {S_path}")
 
     if g_keypair_done_addr is not None:
         done = ql.mem.read(g_keypair_done_addr, 1)[0]

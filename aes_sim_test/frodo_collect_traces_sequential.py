@@ -20,6 +20,14 @@ CRYPTO_CIPHERTEXTBYTES = 9720
 BYTES_CIPHERTEXT_C1    = (PARAMS_LOGQ * PARAMS_N    * PARAMS_NBAR) // 8
 BYTES_CIPHERTEXT_C2    = (PARAMS_LOGQ * PARAMS_NBAR * PARAMS_NBAR) // 8
 
+# sk lengths 
+s_length               = 16
+SEED_A_length          = 16 
+b_length               = 9600 
+S_length               = PARAMS_N * PARAMS_NBAR * 2
+pkh                    = 16 
+
+
 SIZE_PK = 9616
 SIZE_SK = 19888
 SIZE_CT = 9720
@@ -353,13 +361,48 @@ def save_keypair(ql):
         sk = ql.mem.read(g_sk_addr, SIZE_SK)
         with open(sk_path, "wb") as f:
             f.write(sk)
+        S_path = os.path.join(output_dir, "S.csv")
+        save_S_from_sk_csv(sk, S_path)
         print(f"SK saved to {sk_path}")
+        print(f"S saved to {S_path}")
 
     if g_keypair_done_addr is not None:
         done = ql.mem.read(g_keypair_done_addr, 1)[0]
         print(f"g_keypair_done = {done}")
 
     keypair_saved = True
+
+def save_S_from_sk_csv(sk, S_path):
+    """
+    Save S in a csv file by extracting S from sk = s || seed_A || b || S || pkh and based on the code S is 2 bytes! 
+    """
+    before_S = s_length+ SEED_A_length + b_length
+    S = sk[before_S: before_S + S_length]
+
+    if len(S) != S_length:
+        raise ValueError(f"S has wrong size: {len(S)} != {S_length}")
+
+    os.makedirs(os.path.dirname(S_path), exist_ok=True)
+
+    with open(S_path, "w", newline="") as f:
+        writer = csv.writer(f)
+
+        header = ["row"] + [f"S_col_{j}" for j in range(PARAMS_NBAR)]
+        writer.writerow(header)
+
+        for i in range(PARAMS_N):
+            row = []
+            for j in range(PARAMS_NBAR):
+                offset = 2 * (i * PARAMS_NBAR + j)
+
+                value = int.from_bytes(
+                    S[offset:offset + 2], #because it is saved as 2 bits 
+                    byteorder="little",
+                    signed=True
+                )
+                row.append(value)
+            writer.writerow([i] + row)
+    print(f"S matrix saved as CSV to {S_path}")
 
 
 def save_ciphertext(ql, index):
