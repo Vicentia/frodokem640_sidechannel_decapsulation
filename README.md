@@ -114,7 +114,7 @@ The firmware is built using the FrodoKEM API from the `pqm4` repository. The ins
 
 
 All scripts (other than the sequantial one that does not use a snapshot because it is not needed) follow the same two-phase flow:
-1. **Snapshot phase** — runs key generation (`crypto_kem_keypair`) and stops at the entry of `crypto_kem_dec`, saving the emulator state (registers + memory) to `snapshot.pkl`, along with the public key and secret key.
+1. **Snapshot phase** — runs key generation (`crypto_kem_keypair`) and stops at the entry of `crypto_kem_dec`, saving the emulator state (registers + memory) to `snapshot.pkl`, along with the public key, secret key and matrix S (that is encouded in sk) as a csv file in the matrix shape (640 by 8). 
 2. **Decapsulation phase** — restores the snapshot, writes a (possibly modified) ciphertext into the emulator's memory, and records the instruction + register trace between `trigger_high` and `trigger_low`.
 
 ---
@@ -202,10 +202,13 @@ Traces are collected one by one, iterating over fault indices `0` through `N-1`.
  
 ```
 output_decapsulation_sequential/
-|---Trace_i/
+|-- Trace_i/
     |--ct_modified_i.bin # Modified ciphertext with first i columns zeroed
     |--output_decapsulation_trace_i.txt # Log of executed instructions and addresses hit during key generation and decapsulation
     |--trace_i.csv # Captured power trace (first i index modified)
+|-- pk.bin # Public key saved after key generation
+|-- sk.bin # Private key saved after key generation
+|-- S.csv # matrix S as csv file 
 ```
  
 A trimmed version of each trace is saved to `output_decapsulation_sequential_TRIM/`.
@@ -218,11 +221,12 @@ A single keygen is performed first and saved as a snapshot, then `N_PARALLEL` de
  
 ```
 output_decapsulation_parallel/
-|--ct_base.bin # Base ciphertext used for all fault injections
+|-- ct_base.bin # Base ciphertext used for all fault injections
 |-- keygen_snapshot_log.txt # Instruction log from key generation up to the multiplication in the decapsulation phase
 |-- snapshot.pkl # snapshotwith keygen until multiplication that is saved on the disk
 |-- pk.bin # Public key saved after key generation
 |-- sk.bin # Private key saved after key generation
+|-- S.csv # matrix S as csv file 
 |-- Trace_i/
     |-- ct_modified_i.bin # Ciphertext with first i columns modified
     |-- trace_i.csv # Captured power trace
@@ -242,6 +246,7 @@ output_decapsulation_sample/
 |-- snapshot.pkl # snapshotwith keygen until multiplication that is saved on the disk
 |-- pk.bin # Public key
 |-- sk.bin # Private key
+|-- S.csv # matrix S as csv file 
 |-- Run_i/ # i-th run (with a fresh random ciphertext)
     |-- Trace_j/ # j is the fault index (number of zeroed columns)
         |-- ciphertext_j.bin # Ciphertext with j columns modified
@@ -262,6 +267,7 @@ output_decapsulation_truncated/
 |--snapshot.pkl # snapshotwith keygen until multiplication that is saved on the disk
 |-- pk.bin # Public key
 |-- sk.bin # Private key
+|-- S.csv # matrix S as csv file 
 |-- trace_i_j.csv # Trace for the i-th run, targeting the j-th dot product
                   # e.g. trace_5_2 = 5th ciphertext, 3rd dot product (0-indexed), which means that it exploits the third column of S
 |-- ciphertext_i.bin # Store the i-th randomly generated ciphertext 
