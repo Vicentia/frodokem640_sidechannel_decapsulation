@@ -514,7 +514,7 @@ def save_keys(ql, output_dir):
         with open(sk_path, "wb") as f:
             f.write(sk)
         S_path = os.path.join(output_dir, "S.csv")
-        save_snapshot_manual(sk, S_path)
+        save_S_from_sk_csv(sk, S_path)
         print(f"SK saved to {sk_path}")
         print(f"S saved to {S_path}")
 
