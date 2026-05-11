@@ -10,7 +10,7 @@ from HW_HD_utils import create_HD_trace, create_HW_trace
 
 def create_npy_file(name_npy_file, folder, leakage_model, cols):
     """
-    Create one .npy file from a folder containing trace CSV files.
+    create one .npy file from a folder containing trace CSV files
     """
     print("Creating simulation traces model....", leakage_model)
     trace_list = []
@@ -36,7 +36,7 @@ def create_npy_file(name_npy_file, folder, leakage_model, cols):
 
 def create_grouped_npy_files(name_npy_file, folder, leakage_model, cols):
     """
-    Create one .npy file per trace index from Run_*/*.csv inputs.
+    create one .npy file per trace index from Run_*/*.csv inputs
     """
     def get_trace_index_from_filename(file_path):
         index = re.search(r"trace_(\d+)\.csv$", file_path.name)
@@ -82,8 +82,7 @@ def create_grouped_npy_files(name_npy_file, folder, leakage_model, cols):
 
 def create_npy_file_truncated(name_npy_file, folder, leakage_model, cols):
     """
-    Create one .npy file per xs_id from trace_{run}_{xs}.csv inputs.
-    Also writes {leakage_model}_SUBTRACE_order.csv for row-order debugging.
+    create one .npy file per xs_id from trace_{run}_{xs}.csv inputs 
     """
     def parse_trace_name(path):
         match = re.match(r"trace_(\d+)_(\d+)\.csv", path.name)
@@ -133,8 +132,7 @@ def create_npy_file_truncated(name_npy_file, folder, leakage_model, cols):
             "trace_path": str(file),
         })
 
-        if row_in_xs < 5:
-            print(f"Trace row {row_in_xs} for xs={xs_id} -> {file.name}")
+        print(f"Trace row {row_in_xs} for xs={xs_id} -> {file.name}")
 
     trace_order_df = pd.DataFrame(trace_order_rows)
     trace_order_path = os.path.join(os.path.dirname(name_npy_file), f"{leakage_model}_SUBTRACE_order.csv")

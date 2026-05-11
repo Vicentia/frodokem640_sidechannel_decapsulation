@@ -31,10 +31,11 @@ def compute_correlation(traces, target_variable):
     return corr
 
 
-def plot_correlation(corr_array, title, save_path=None, figsize=(20, 6)):
+def plot_correlation(corr_array, title, save_path=None, figsize=(20, 6), no_instructions=None):
     plt.close("all")
     plt.figure(figsize=figsize)
-
+    plt.xlim(0, no_instructions)
+ 
     for label, corr in sorted(corr_array.items()):
         plt.plot(corr, label=label, alpha=0.8, linewidth=0.8)
 
@@ -50,9 +51,10 @@ def plot_correlation(corr_array, title, save_path=None, figsize=(20, 6)):
     plt.show()
 
 
-def plot_hw_hd_comparison(data_HW, data_HD, title="HW and HD comparison", save_path=None, max_traces=None, figsize=(30, 10)):
+def plot_hw_hd_comparison(data_HW, data_HD, title="HW and HD comparison", save_path=None, max_traces=None, figsize=(30, 10), no_instructions=None):
     plt.close("all")
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=figsize, sharex=True)
+    plt.xlim(0, no_instructions)
 
     number_traces = len(data_HW)
     if max_traces is not None:
@@ -78,10 +80,11 @@ def plot_hw_hd_comparison(data_HW, data_HD, title="HW and HD comparison", save_p
     plt.show()
 
 
-def plot_hw_hd_two_traces(data_HW, data_HD, index1, index2, save_path=None, figsize=(30, 10)):
+def plot_hw_hd_two_traces(data_HW, data_HD, index1, index2, save_path=None, figsize=(30, 10), no_instructions=None):
     plt.close("all")
 
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=figsize, sharex=True)
+    plt.xlim(0, no_instructions)
 
     ax1.plot(data_HW[index1], alpha=0.5, label=f"HW trace_{index1}")
     ax1.plot(data_HW[index2], alpha=0.5, label=f"HW trace_{index2}")
@@ -104,7 +107,7 @@ def plot_hw_hd_two_traces(data_HW, data_HD, index1, index2, save_path=None, figs
     plt.show()
 
 
-def plot_hw_hd_difference(data_HW, data_HD, index1, index2, save_path=None, figsize=(30, 10)):
+def plot_hw_hd_difference(data_HW, data_HD, index1, index2, save_path=None, figsize=(30, 10), no_instructions=None):
     trace1_HW = data_HW[index1]
     trace2_HW = data_HW[index2]
 
@@ -120,7 +123,7 @@ def plot_hw_hd_difference(data_HW, data_HD, index1, index2, save_path=None, figs
     plt.close("all")
 
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=figsize, sharex=True)
-
+    plt.xlim(0, no_instructions)
     ax1.plot(diff_HW)
     ax1.set_title(f"Point-wise HW difference: trace_{index1} - trace_{index2}")
     ax1.set_ylabel("Difference")
@@ -138,12 +141,16 @@ def plot_hw_hd_difference(data_HW, data_HD, index1, index2, save_path=None, figs
     plt.show()
 
 
-def plot_variance_and_std(data_HW, data_HD, result_dir=None):
+def plot_variance_and_std(data_HW, data_HD, result_dir=None, no_instructions=None):
     var_hw = np.var(data_HW, axis=0)
     var_hd = np.var(data_HD, axis=0)
 
     std_hw = np.std(data_HW, axis=0)
     std_hd = np.std(data_HD, axis=0)
+
+    plt.close("all")
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(30, 10), sharex=True)
+    plt.xlim(0, no_instructions)
 
     plt.close("all")
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(30, 10), sharex=True)
@@ -199,10 +206,11 @@ def cross_correlation(trace1, trace2):
     return np.correlate(trace1 - trace1.mean(), trace2 - trace2.mean(), mode="full")[n - 1:] / (std1 * std2 * n)
 
 
-def plot_cross_correlation_hw_hd(data_HW, data_HD, pairs, save_path=None, figsize=(30, 10)):
+def plot_cross_correlation_hw_hd(data_HW, data_HD, pairs, save_path=None, figsize=(30, 10), no_instructions=None):
     plt.close("all")
 
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=figsize, sharex=True)
+    plt.xlim(0, no_instructions)
 
     for i, j in pairs:
         trace1_HW = data_HW[i]
@@ -272,13 +280,14 @@ def compute_snr(trace1, trace2):
     return snr
 
 
-def plot_snr_single(snr, title, save_path=None):
+def plot_snr_single(snr, title, save_path=None, no_instructions=None):
     plt.close("all")
     plt.figure(figsize=(20, 6))
     plt.plot(snr)
     plt.title(title)
     plt.xlabel("Instruction index")
     plt.ylabel("SNR")
+    plt.xlim(0, no_instructions)
     plt.tight_layout()
 
     if save_path is not None:
@@ -287,7 +296,7 @@ def plot_snr_single(snr, title, save_path=None):
     plt.show()
 
 
-def plot_snr_combined(snr_dict, title, save_path=None):
+def plot_snr_combined(snr_dict, title, save_path=None, no_instructions=None):
     plt.close("all")
     plt.figure(figsize=(20, 6))
 
@@ -298,6 +307,7 @@ def plot_snr_combined(snr_dict, title, save_path=None):
     plt.xlabel("Instruction index")
     plt.ylabel("SNR")
     plt.legend()
+    plt.xlim(0, no_instructions)
     plt.tight_layout()
 
     if save_path is not None:
