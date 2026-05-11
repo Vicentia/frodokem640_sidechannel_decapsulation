@@ -143,6 +143,9 @@ def get_S_csv_path(run_index):
 def get_B_from_registers_csv_path(run_index):
     return os.path.join(get_B_dir(), f"B_from_registers_{run_index}.csv")
 
+def get_B_packed_from_registers_csv_path(run_index):
+    return os.path.join(get_B_dir(), f"B_from_registers_packed_{run_index}.csv")
+
 # -------------------------- RESET --------------------------
 
 def reset_decapsulation_globals():
@@ -436,6 +439,7 @@ def extract_smlad_operands(trace_csv_path):
 
     B_values = []
     S_values = []
+    B_packed_values = []
 
     for _, row in df.iterrows():
         if row["instruction"] != "smlad":
@@ -447,6 +451,7 @@ def extract_smlad_operands(trace_csv_path):
 
         # From Ghidra: smlad r0, r2, r7, r0
         # r2 = B operand, r7 = S operand
+
         b_reg = canonical_reg(ops[1])
         s_reg = canonical_reg(ops[2])
 
@@ -454,16 +459,20 @@ def extract_smlad_operands(trace_csv_path):
             print(f"[ERROR] Missing register column. operands={ops}, b_reg={b_reg}, s_reg={s_reg}")
             continue
 
+        b_value = int(row[b_reg], 0) & 0xffffffff
         b_low, b_high = split_u32_to_u16_pair(row[b_reg])
         s_low, s_high = split_u32_to_i16_pair(row[s_reg])
 
+        B_packed_values.append(b_value)
         B_values.extend([b_low, b_high])
         S_values.extend([s_low, s_high])
 
     return (
+        np.array(B_packed_values, dtype=np.uint32),
         np.array(B_values, dtype=np.uint16),
         np.array(S_values, dtype=np.int16),
     )
+
 
 def extract_B_from_registers_matrix_from_trace(run_index, xs_id):
     """
@@ -471,13 +480,18 @@ def extract_B_from_registers_matrix_from_trace(run_index, xs_id):
     """
     trace_path = get_trim_csv_path(run_index, xs_id)
 
-    B_from_registers, S_from_registers = extract_smlad_operands(trace_path)
+    B_packed, B_from_registers, S_from_registers = extract_smlad_operands(trace_path)
+
+    if len(B_packed) != (PARAMS_N * PARAMS_NBAR) // 2:
+        print(f"[ERROR] B_packed length is {len(B_packed)}, expected {(PARAMS_N * PARAMS_NBAR) // 2} for run {run_index} xs_id {xs_id}")
+        return None, None, S_from_registers
 
     if len(B_from_registers) != PARAMS_N * PARAMS_NBAR:
         print(f"[ERROR] B_from_registers length is {len(B_from_registers)}, expected {PARAMS_N * PARAMS_NBAR} for run {run_index} xs_id {xs_id}")
-        return None, S_from_registers
+        return None, None, S_from_registers
 
     return (
+        B_packed.reshape(PARAMS_NBAR, PARAMS_N//2),
         B_from_registers.reshape(PARAMS_NBAR, PARAMS_N),
         # here S is just an xs() call because this is the way in which the subtrace is created 
         S_from_registers,
@@ -495,6 +509,7 @@ def save_and_check_B_from_registers_from_traces(run_index):
     B_expected = B_csv[[f"B_col_{j}" for j in range(PARAMS_N)]].to_numpy(dtype=np.uint16)
 
     reference_B = None
+    reference_B_packed = None
     matches_reference_count = 0
     total_checks = 0
 
@@ -505,19 +520,22 @@ def save_and_check_B_from_registers_from_traces(run_index):
             print(f"[ERROR] Trace does not exist, cannot extract raw B: {trace_path}")
             continue
 
-        B_matrix, _ = extract_B_from_registers_matrix_from_trace(run_index, xs_id)
+        B_packed_matrix, B_matrix, _ = extract_B_from_registers_matrix_from_trace(run_index, xs_id)
 
-        if B_matrix is None:
+        if B_packed_matrix is None or B_matrix is None:
             continue
 
         if reference_B is None:
-            reference_B= B_matrix
+            reference_B = B_matrix
+            reference_B_packed = B_packed_matrix
 
         for b_row in range(PARAMS_NBAR):
             B_row = B_matrix[b_row]
+            B_packed_row = B_packed_matrix[b_row]
 
             matches_B = np.array_equal(B_row, B_expected[b_row])
             matches_reference = np.array_equal(B_row, reference_B[b_row])
+            matches_packed_reference = np.array_equal(B_packed_row, reference_B_packed[b_row])
 
             matches_reference_count += int(matches_reference)
             total_checks += 1
@@ -536,6 +554,13 @@ def save_and_check_B_from_registers_from_traces(run_index):
                     f"does not match xs_id=0 B. first mismatches={mismatch}"
                 )
 
+            if not matches_packed_reference:
+                mismatch = np.where(B_packed_row != reference_B_packed[b_row])
+                raise StopEmulation(
+                    f"[B CHECK ERROR] run={run_index} xs_id={xs_id} B_row={b_row} "
+                    f"packed B does not match xs_id=0 packed B. first mismatches={mismatch}"
+                )
+
     if reference_B is None:
         print(f"[ERROR] No valid B trace data found for run {run_index}")
         return
@@ -550,7 +575,16 @@ def save_and_check_B_from_registers_from_traces(run_index):
     B_from_registers_df.insert(0, "row", range(PARAMS_NBAR))
     B_from_registers_df.to_csv(B_output_path, index=False)
 
+    B_packed_output_path = get_B_packed_from_registers_csv_path(run_index)
+    B_packed_from_registers_df = pd.DataFrame(
+        reference_B_packed,
+        columns=[f"B_pair_{i}" for i in range(PARAMS_N // 2)]
+    )
+    B_packed_from_registers_df.insert(0, "row", range(PARAMS_NBAR))
+    B_packed_from_registers_df.to_csv(B_packed_output_path, index=False)
+
     print(f"Saved B matrix from registers to {B_output_path}")
+    print(f"Saved packed B matrix from registers to {B_packed_output_path}")
     print(
         f"[B CHECK] run={run_index}: B identical across xs traces "
         f"{matches_reference_count}/{total_checks}."
@@ -576,7 +610,7 @@ def save_and_check_S_from_traces(run_index):
             continue
 
         # S_from_registers represents just one xs() call and it needs to be concatenated witth all rows to create the full S matrix
-        _, S_from_registers = extract_smlad_operands(trace_path)
+        _, _, S_from_registers = extract_smlad_operands(trace_path)
 
         if len(S_from_registers) != PARAMS_N * PARAMS_NBAR:
             print(
@@ -656,7 +690,7 @@ def compare_B_ciphertext_vs_trace(run_index, xs_id):
         print(f"[COMPARE ERROR] Missing trace CSV: {trace_path}")
         return
 
-    B_from_registers, S_from_registers = extract_smlad_operands(trace_path)
+    _, B_from_registers, S_from_registers = extract_smlad_operands(trace_path)
 
     B_csv = pd.read_csv(B_csv_path)
     B_expected = B_csv[[f"B_col_{j}" for j in range(PARAMS_N)]].to_numpy(dtype=np.uint16)

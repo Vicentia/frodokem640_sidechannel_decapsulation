@@ -21,3 +21,32 @@ aes_sim_test/output_decapsulation_sequantial_TRIM/
 aes_sim_test/output_decapsulation_sequential/
 aes_sim_test/Results_decapsulation_parallel/
 aes_sim_test/Results_decapsulation_sample/
+
+# Trace outputs
+output_decapsulation_parallel_TRIM/
+output_decapsulation_parallel/
+output_decapsulation_sample/
+output_decapsulation_sample_TRIM/
+output_decapsulation_truncated/
+output_decapsulation_truncated_TRIM/
+
+# CSV traces
+trace_*.csv
+
+# numpy/results
+Results_*/
+*.npy
+# Firmware generated files
+firmware/*.lock
+firmware/*.lock~
+firmware/*.gpr
+
+firmware/*.rep/
+*.rep/
+
+# temp/cache files
+*.bak
+*.db
+*.gbf
+*.grf
+*.ps
