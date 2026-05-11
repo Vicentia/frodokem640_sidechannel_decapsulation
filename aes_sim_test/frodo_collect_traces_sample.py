@@ -299,7 +299,7 @@ def test_modify_ciphertext_c1(run_index, index, c1_random=None, ct=None):
                     f"[ERROR] Column {ind} row {i} was changed unexpectedly"
                 )
 
-     # Test 4: check that the sum of all values in c1 is consistent with the zeroing
+    # Test 4: check that the sum of all values in c1 is consistent with the zeroing
     q = 1 << PARAMS_LOGQ
     total_sum = sum(random_vals) % q
     removed_sum = sum(

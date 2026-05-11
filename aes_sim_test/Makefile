@@ -151,7 +151,7 @@ decap_truncated:
 		--output-dir $(OUTPUT_DIR_TRUNCATED) \
 		--output-dir-trim $(OUTPUT_DIR_TRUNCATED_TRIM) \
 		--skip-snapshot \
-		> $(OUTPUT_DIR_TRUNCATED)/output_sample.txt 2>&1
+		> $(OUTPUT_DIR_TRUNCATED)/output_truncated.txt 2>&1
 	@echo "All truncated traces collected — see $(OUTPUT_DIR_TRUNCATED) and $(OUTPUT_DIR_TRUNCATED_TRIM)"
 
 all_truncated:

@@ -9,6 +9,9 @@ import argparse
 import traceback
 import multiprocessing
 
+import pandas as pd
+import numpy as np
+
 from qiling.core import Qiling
 from qiling.const import QL_ARCH, QL_OS, QL_VERBOSE
 from qiling.extensions.mcu.stm32f4 import stm32f407
@@ -28,12 +31,12 @@ CRYPTO_CIPHERTEXTBYTES = 9720
 BYTES_CIPHERTEXT_C1    = (PARAMS_LOGQ * PARAMS_N * PARAMS_NBAR) // 8
 BYTES_CIPHERTEXT_C2    = (PARAMS_LOGQ * PARAMS_NBAR * PARAMS_NBAR) // 8
 
-# sk lengths 
-s_length               = 16
-SEED_A_length          = 16 
-b_length               = 9600 
-S_length               = PARAMS_N * PARAMS_NBAR * 2
-pkh                    = 16 
+# sk lengths
+s_length               = 16 # the length of the secret key s 
+SEED_A_length          = 16 # the length of the seed for generating A
+b_length               = 9600 # the length of the b vector 
+S_length               = PARAMS_N * PARAMS_NBAR * 2 # the length of the S matrix (each element is 2 bytes)
+pkh                    = 16 # the length of the public key hash
 
 SIZE_PK = 9616
 SIZE_SK = 19888
@@ -45,6 +48,13 @@ REG_NAMES = [
     "r8", "r9", "r10", "r11",
     "r12", "sp", "lr", "pc"
 ]
+
+REG_ALIAS = {
+    "sb": "r9",
+    "sl": "r10",
+    "fp": "r11",
+    "ip": "r12",
+}
 
 # -------------------------- GLOBAL VARIABLES --------------------------
 
@@ -65,7 +75,6 @@ g_ct_addr           = None
 crypto_kem_dec_addr = None
 dec_return_addr     = None
 
-# multiplication addresses
 mul_bs_addr         = None
 xs_addr             = None
 
@@ -77,31 +86,26 @@ snapshot_saved     = False
 hit_trigger_low    = False
 trace_started      = False
 trace_saved        = False
-# prevents hook re-entrancy after emu_stop() is called
 stop_requested     = False
 
 address_PK = None
 address_SK = None
 address_CT = None
 
-# globals 
 global_output_dir = None
 output_dir        = None
 output_dir_trim   = None
 snapshot_path     = None
 
-# contors 
 instr_counter       = 0
 current_run_index   = 0
 current_fault_index = 0
 
-# instruction and registers initialisation
 ins_trace = []
 reg_trace = []
 
-# xs product trace state
 in_mul_bs              = False
-xs_call_counter        = 0  # there are 8 xs calls inside one mul_bs
+xs_call_counter        = 0
 active_xs              = False
 active_xs_id           = None
 active_xs_return_addr  = None
@@ -115,21 +119,29 @@ xs_reg_traces = [[] for _ in range(PARAMS_NBAR)]
 def get_snapshot_path(out_dir):
     return os.path.join(out_dir, "snapshot.pkl")
 
-
 def get_ciphertext_path(run_index):
     return os.path.join(output_dir, f"ciphertext_{run_index}.bin")
 
-
 def get_trace_csv_path(run_index, xs_id):
-    # trace_i_j where i = run index, j = xs call / S-column index
     return os.path.join(output_dir, f"trace_{run_index}_{xs_id}.csv")
-
 
 def get_trim_csv_path(run_index, xs_id):
     return os.path.join(output_dir_trim, f"trace_{run_index}_{xs_id}.csv")
 
-def get_ct_base_path(run_index):
-    return get_ciphertext_path(run_index)
+def get_B_dir():
+    return os.path.join(output_dir, "B")
+
+def get_S_dir():
+    return os.path.join(output_dir, "S")
+
+def get_B_csv_path(run_index):
+    return os.path.join(get_B_dir(), f"B_{run_index}.csv")
+
+def get_S_csv_path(run_index):
+    return os.path.join(get_S_dir(), f"S_{run_index}.csv")
+
+def get_B_from_registers_csv_path(run_index):
+    return os.path.join(get_B_dir(), f"B_from_registers_{run_index}.csv")
 
 # -------------------------- RESET --------------------------
 
@@ -192,40 +204,39 @@ def hard_stop(ql):
 # -------------------------- CIPHERTEXT HELPERS --------------------------
 
 def generate_base_ciphertext(run_index):
-
     os.makedirs(output_dir, exist_ok=True)
 
-    ct_base_path = get_ct_base_path(run_index)
+    ct_path = get_ciphertext_path(run_index)
 
     c1_random = os.urandom(BYTES_CIPHERTEXT_C1)
     c2        = bytes(BYTES_CIPHERTEXT_C2)
     salt      = bytes(CRYPTO_CIPHERTEXTBYTES - BYTES_CIPHERTEXT_C1 - BYTES_CIPHERTEXT_C2)
     base_ct   = c1_random + c2 + salt
 
-    with open(ct_base_path, "wb") as f:
+    with open(ct_path, "wb") as f:
         f.write(base_ct)
 
-    print(f"[INFO] Base ciphertext for Run_{run_index + 1} created at {ct_base_path}")
+    print(f"[INFO] Ciphertext for Run_{run_index + 1} created at {ct_path}")
     return base_ct
 
 
 def load_base_ciphertext(run_index):
-    ct_base_path = get_ct_base_path(run_index)
+    ct_path = get_ciphertext_path(run_index)
 
-    if not os.path.exists(ct_base_path):
+    if not os.path.exists(ct_path):
         return generate_base_ciphertext(run_index)
 
-    with open(ct_base_path, "rb") as f:
-        ct_base = f.read()
+    with open(ct_path, "rb") as f:
+        ct = f.read()
 
-    if len(ct_base) != CRYPTO_CIPHERTEXTBYTES:
+    if len(ct) != CRYPTO_CIPHERTEXTBYTES:
         raise StopEmulation(
-            f"[ERROR] Base ciphertext for Run_{run_index + 1} has wrong size: "
-            f"{len(ct_base)} != {CRYPTO_CIPHERTEXTBYTES}"
+            f"[ERROR] Ciphertext for Run_{run_index + 1} has wrong size: "
+            f"{len(ct)} != {CRYPTO_CIPHERTEXTBYTES}"
         )
 
-    print(f"[INFO] Loaded base ciphertext for Run_{run_index + 1} from {ct_base_path}")
-    return ct_base
+    print(f"[INFO] Loaded ciphertext for Run_{run_index + 1} from {ct_path}")
+    return ct
 
 
 def zero_bits(data, start, D):
@@ -256,15 +267,19 @@ def modify_ciphertext_c1(run_index, index):
 
 def unpack_c1(c1):
     values = []
+
     for i in range(PARAMS_NBAR):
         for j in range(PARAMS_N):
             start = (i * PARAMS_N + j) * PARAMS_LOGQ
             val = 0
+
             for bit in range(PARAMS_LOGQ):
                 byte_pos = (start + bit) >> 3
                 bit_pos  = 7 - ((start + bit) & 7)
-                val |= ((c1[byte_pos] >> bit_pos) & 1) << bit
+                val |= ((c1[byte_pos] >> bit_pos) & 1) << (PARAMS_LOGQ - 1 - bit)
+
             values.append(val)
+
     return values
 
 
@@ -289,7 +304,7 @@ def test_modify_ciphertext_c1(run_index, index, c1_random=None, ct=None):
             f"[ERROR] The size of ct {len(ct)} does not match expected {CRYPTO_CIPHERTEXTBYTES}"
         )
 
-    # Test 2: check that the first index columns are zeroed and the rest are unchanged
+     # Test 2: check that the first index columns are zeroed and the rest are unchanged
     for ind in range(index):
         for i in range(PARAMS_NBAR):
             val = altered_vals[i * PARAMS_N + ind]
@@ -305,8 +320,8 @@ def test_modify_ciphertext_c1(run_index, index, c1_random=None, ct=None):
                 raise StopEmulation(
                     f"[ERROR] Column {ind} row {i} was changed unexpectedly"
                 )
-
-     # Test 4: check that the sum of all values in c1 is consistent with the zeroing
+            
+    # Test 4: check that the sum of all values in c1 is consistent with the zeroing
     q = 1 << PARAMS_LOGQ
     total_sum = sum(random_vals) % q
     removed_sum = sum(
@@ -324,6 +339,363 @@ def test_modify_ciphertext_c1(run_index, index, c1_random=None, ct=None):
         f"[TEST PASSED] Ciphertext modification for Run_{run_index + 1}, "
         f"index {index} is correct"
     )
+
+
+# -------------------------- B/S CSV HELPERS --------------------------
+
+def save_S_from_sk_csv(sk, S_path):
+    """
+    sk = s || seed_A || b || S || pkh
+    """
+    before_S = s_length + SEED_A_length + b_length
+    S = sk[before_S: before_S + S_length]
+
+    if len(S) != S_length:
+        raise ValueError(f"S has wrong size: {len(S)} != {S_length}")
+
+    S_by_xs = np.frombuffer(S, dtype="<i2").reshape(PARAMS_NBAR, PARAMS_N)
+    S_matrix = S_by_xs.T
+
+    os.makedirs(os.path.dirname(S_path), exist_ok=True)
+
+    with open(S_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        header = ["row"] + [f"S_col_{j}" for j in range(PARAMS_NBAR)]
+        writer.writerow(header)
+
+        for i in range(PARAMS_N):
+            writer.writerow([i] + S_matrix[i].astype(int).tolist())
+
+    print(f"S matrix saved as CSV to {S_path}")
+
+# we load the S vector from sk file 
+def load_S_vectors_from_sk_file():
+    sk_path = os.path.join(output_dir, "sk.bin")
+
+    if not os.path.exists(sk_path):
+        print(f"[ERROR] Missing sk.bin, cannot compare S against key: {sk_path}")
+        return None
+
+    with open(sk_path, "rb") as f:
+        sk = f.read()
+
+    before_S = s_length + SEED_A_length + b_length
+    S = sk[before_S: before_S + S_length]
+
+    if len(S) != S_length:
+        raise ValueError(f"S has wrong size: {len(S)} != {S_length}")
+
+    return np.frombuffer(S, dtype="<i2").reshape(PARAMS_NBAR, PARAMS_N)
+
+# create csv B by unpacking c1 from ciphertext because B unpack(c1)
+def save_B_from_ciphertext_csv(ct, B_path):
+    c1 = ct[:BYTES_CIPHERTEXT_C1]
+
+    B_values = unpack_c1(c1)
+
+    os.makedirs(os.path.dirname(B_path), exist_ok=True)
+
+    with open(B_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        header = ["row"] + [f"B_col_{j}" for j in range(PARAMS_N)]
+        writer.writerow(header)
+        for i in range(PARAMS_NBAR):
+            row = []
+            for j in range(PARAMS_N):
+                value = B_values[i * PARAMS_N + j]
+                row.append(value)
+            writer.writerow([i] + row)
+
+    print(f"B matrix saved as CSV to {B_path}")
+
+
+def canonical_reg(reg):
+    return REG_ALIAS.get(reg.strip(), reg.strip())
+
+
+def split_u32_to_u16_pair(x):
+    x = int(x, 0) & 0xffffffff
+    low = x & 0xffff
+    high = (x >> 16) & 0xffff
+    return low, high
+
+# for S which we want it as signed 16-bit
+def split_u32_to_i16_pair(x):
+    x = int(x, 0) & 0xffffffff
+    low = x & 0xffff
+    high = (x >> 16) & 0xffff
+    if low >= 0x8000:
+        low -= 0x10000
+    if high >= 0x8000:
+        high -= 0x10000
+    return low, high
+
+def extract_smlad_operands(trace_csv_path):
+    df = pd.read_csv(trace_csv_path)
+    df.fillna("0x0", inplace=True)
+
+    B_values = []
+    S_values = []
+
+    for _, row in df.iterrows():
+        if row["instruction"] != "smlad":
+            continue
+
+        ops = [x.strip() for x in row["operands"].split(",")]
+        if len(ops) < 4:
+            continue
+
+        # From Ghidra: smlad r0, r2, r7, r0
+        # r2 = B operand, r7 = S operand
+        b_reg = canonical_reg(ops[1])
+        s_reg = canonical_reg(ops[2])
+
+        if b_reg not in row.index or s_reg not in row.index:
+            print(f"[ERROR] Missing register column. operands={ops}, b_reg={b_reg}, s_reg={s_reg}")
+            continue
+
+        b_low, b_high = split_u32_to_u16_pair(row[b_reg])
+        s_low, s_high = split_u32_to_i16_pair(row[s_reg])
+
+        B_values.extend([b_low, b_high])
+        S_values.extend([s_low, s_high])
+
+    return (
+        np.array(B_values, dtype=np.uint16),
+        np.array(S_values, dtype=np.int16),
+    )
+
+def extract_B_from_registers_matrix_from_trace(run_index, xs_id):
+    """
+    Extract B' and S from trace 
+    """
+    trace_path = get_trim_csv_path(run_index, xs_id)
+
+    B_from_registers, S_from_registers = extract_smlad_operands(trace_path)
+
+    if len(B_from_registers) != PARAMS_N * PARAMS_NBAR:
+        print(f"[ERROR] B_from_registers length is {len(B_from_registers)}, expected {PARAMS_N * PARAMS_NBAR} for run {run_index} xs_id {xs_id}")
+        return None, S_from_registers
+
+    return (
+        B_from_registers.reshape(PARAMS_NBAR, PARAMS_N),
+        # here S is just an xs() call because this is the way in which the subtrace is created 
+        S_from_registers,
+    )
+
+
+def save_and_check_B_from_registers_from_traces(run_index):
+    B_csv_path = get_B_csv_path(run_index)
+
+    if not os.path.exists(B_csv_path):
+        print(f"[MISSING CSV] {B_csv_path} does not exist")
+        return
+
+    B_csv = pd.read_csv(B_csv_path)
+    B_expected = B_csv[[f"B_col_{j}" for j in range(PARAMS_N)]].to_numpy(dtype=np.uint16)
+
+    reference_B = None
+    matches_reference_count = 0
+    total_checks = 0
+
+    for xs_id in range(PARAMS_NBAR):
+        trace_path = get_trim_csv_path(run_index, xs_id)
+
+        if not os.path.exists(trace_path):
+            print(f"[ERROR] Trace does not exist, cannot extract raw B: {trace_path}")
+            continue
+
+        B_matrix, _ = extract_B_from_registers_matrix_from_trace(run_index, xs_id)
+
+        if B_matrix is None:
+            continue
+
+        if reference_B is None:
+            reference_B= B_matrix
+
+        for b_row in range(PARAMS_NBAR):
+            B_row = B_matrix[b_row]
+
+            matches_B = np.array_equal(B_row, B_expected[b_row])
+            matches_reference = np.array_equal(B_row, reference_B[b_row])
+
+            matches_reference_count += int(matches_reference)
+            total_checks += 1
+
+            if not matches_B:
+                mismatch = np.where(B_row != B_expected[b_row])
+                raise StopEmulation(
+                    f"[B CHECK ERROR] run={run_index} xs_id={xs_id} B_row={b_row} "
+                    f"does not match B_{run_index}.csv. first mismatches={mismatch}"
+                )
+
+            if not matches_reference:
+                mismatch = np.where(B_row != reference_B[b_row])
+                raise StopEmulation(
+                    f"[B CHECK ERROR] run={run_index} xs_id={xs_id} B_row={b_row} "
+                    f"does not match xs_id=0 B. first mismatches={mismatch}"
+                )
+
+    if reference_B is None:
+        print(f"[ERROR] No valid B trace data found for run {run_index}")
+        return
+
+    os.makedirs(get_B_dir(), exist_ok=True)
+
+    B_output_path = get_B_from_registers_csv_path(run_index)
+    B_from_registers_df = pd.DataFrame(
+        reference_B,
+        columns=[f"B_col_{i}" for i in range(PARAMS_N)]
+    )
+    B_from_registers_df.insert(0, "row", range(PARAMS_NBAR))
+    B_from_registers_df.to_csv(B_output_path, index=False)
+
+    print(f"Saved B matrix from registers to {B_output_path}")
+    print(
+        f"[B CHECK] run={run_index}: B identical across xs traces "
+        f"{matches_reference_count}/{total_checks}."
+    )
+
+
+def save_and_check_S_from_traces(run_index):
+    S_expected = load_S_vectors_from_sk_file()
+
+    if S_expected is None:
+        return
+
+    S_vectors = []
+    matches_sk_count = 0
+    matches_repeat_count = 0
+    total_checks = 0
+
+    for xs_id in range(PARAMS_NBAR):
+        trace_path = get_trim_csv_path(run_index, xs_id)
+
+        if not os.path.exists(trace_path):
+            print(f"[ERROR] Trace does not exist, cannot extract S: {trace_path}")
+            continue
+
+        # S_from_registers represents just one xs() call and it needs to be concatenated witth all rows to create the full S matrix
+        _, S_from_registers = extract_smlad_operands(trace_path)
+
+        if len(S_from_registers) != PARAMS_N * PARAMS_NBAR:
+            print(
+                f"[ERROR] S_from_registers length is {len(S_from_registers)}, expected {PARAMS_N * PARAMS_NBAR}. "
+                f"Cannot split into 8 xs() calls safely."
+            )
+            continue
+
+        S_rows = S_from_registers.reshape(PARAMS_NBAR, PARAMS_N)
+        S_vector = S_rows[0]
+        S_vectors.append((xs_id, S_vector))
+
+        expected_vector = S_expected[xs_id]
+
+        # Check if the S vector from this trace matches the expected S vector from the key 
+        # and if it matches the S vector from the first trace (e.g xs_id=0) because S is created by collecting all the xs() calls 
+        for row in range(PARAMS_NBAR):
+            S_row = S_rows[row]
+            matches_sk = np.array_equal(S_row, expected_vector)
+            matches_first_row = np.array_equal(S_row, S_vector)
+
+            matches_sk_count += int(matches_sk)
+            matches_repeat_count += int(matches_first_row)
+            total_checks += 1
+
+            if not matches_sk:
+                mismatch = np.where(S_row != expected_vector)[0][:5]
+                raise StopEmulation(
+                    f"[S CHECK ERROR] run={run_index} xs_id={xs_id} B_row={row} "
+                    f"does not match S from sk. first mismatches={mismatch}"
+                )
+
+            if not matches_first_row:
+                mismatch = np.where(S_row != S_vector)[0][:5]
+                raise StopEmulation(
+                    f"[S CHECK ERROR] run={run_index} xs_id={xs_id} B_row={row} "
+                    f"does not repeat first S row. first mismatches={mismatch}"
+                )
+
+    if len(S_vectors) != PARAMS_NBAR:
+        print(f"[ERROR] Only extracted {len(S_vectors)}/{PARAMS_NBAR} S vectors for run {run_index}")
+
+    if not S_vectors:
+        print(f"[ERROR] No valid S trace data found for run {run_index}")
+        return
+
+    S_by_xs = np.zeros((PARAMS_NBAR, PARAMS_N), dtype=np.int16)
+    for xs_id, S_vector in S_vectors:
+        S_by_xs[xs_id] = S_vector
+
+    S_path = get_S_csv_path(run_index)
+    os.makedirs(os.path.dirname(S_path), exist_ok=True)
+    S_matrix = S_by_xs.T
+    S_df = pd.DataFrame(
+        S_matrix,
+        columns=[f"S_col_{i}" for i in range(PARAMS_NBAR)]
+    )
+    S_df.insert(0, "row", range(PARAMS_N))
+    S_df.to_csv(S_path, index=False)
+
+    print(f"[S] Saved S matrix from registers to {S_path}")
+    print(
+        f"[S CHECK] run={run_index}: S register rows match sk {matches_sk_count}/{total_checks}; "
+        f"S repeated across B rows {matches_repeat_count}/{total_checks}."
+    )
+
+
+def compare_B_ciphertext_vs_trace(run_index, xs_id):
+    B_csv_path = get_B_csv_path(run_index)
+    trace_path = get_trim_csv_path(run_index, xs_id)
+
+    if not os.path.exists(B_csv_path):
+        print(f"[COMPARE ERROR] Missing B CSV: {B_csv_path}")
+        return
+
+    if not os.path.exists(trace_path):
+        print(f"[COMPARE ERROR] Missing trace CSV: {trace_path}")
+        return
+
+    B_from_registers, S_from_registers = extract_smlad_operands(trace_path)
+
+    B_csv = pd.read_csv(B_csv_path)
+    B_expected = B_csv[[f"B_col_{j}" for j in range(PARAMS_N)]].to_numpy(dtype=np.uint16)
+    print("-----------------------------------------")
+    print("\n B from ciphertext vs B from register:")
+    print(f"run_index       = {run_index}")
+    print(f"xs_id           = {xs_id}")
+    print(f"B csv path      = {B_csv_path}")
+    print(f"trace path      = {trace_path}")
+    print(f"B_from_registers length = {len(B_from_registers)}")
+    print(f"S_trace length  = {len(S_from_registers)}")
+
+    if len(B_from_registers) > 0:
+        print(f"B_from_registers first 10 = {B_from_registers[:10]}")
+        print(f"B_from_registers min/max  = {B_from_registers.min()} / {B_from_registers.max()}")
+
+    if len(B_from_registers) != PARAMS_N * PARAMS_NBAR:
+        print(
+            f"[ERROR] B_from_registers length is {len(B_from_registers)}, expected {PARAMS_N * PARAMS_NBAR}. "
+            f"Skipping chunked B comparison."
+        )
+        print("-----------------------------------------\n")
+        return
+
+    B_register_matrix = B_from_registers.reshape(PARAMS_NBAR, PARAMS_N)
+
+    for row in range(PARAMS_NBAR):
+        B_expected_row = B_expected[row]
+        B_register_row = B_register_matrix[row]
+        direct_match = np.array_equal(B_register_row, B_expected_row)
+        first_mismatch = np.where(B_register_row != B_expected_row)[0][:5]
+
+        print(
+            f"B row {row}: "
+            f"B_register_match={direct_match}, "
+            f"first_B_row_mismatch={first_mismatch}"
+        )
+
+    print("-----------------------------------------\n")
 
 
 # -------------------------- EMULATOR HELPERS --------------------------
@@ -400,13 +772,13 @@ def restore_snapshot_manual(ql, snapshot):
             ql.mem.write(start, data)
             print(f"Restored region [{label}]: {hex(start)}-{hex(end)}")
         except Exception as e:
-            print(f"[WARNING] Failed to restore region [{label}]: {e}")
+            print(f"[ERROR] Failed to restore region [{label}]: {e}")
 
     for reg, val in snapshot["regs"].items():
         try:
             ql.arch.regs.write(reg, val)
         except Exception as e:
-            print(f"[WARNING] Failed to restore register {reg}: {e}")
+            print(f"[ERROR] Failed to restore register {reg}: {e}")
 
 
 def hook_mem_invalid(uc, access, address, size, value, user_data):
@@ -451,23 +823,23 @@ def setup_qiling_instance(elf_file):
                 usart = getattr(ql.hw, usart_name, None)
 
             if usart is None:
-                print(f"[WARNING] {usart_name} not available")
+                print(f"[ERROR] {usart_name} not available")
                 continue
 
             try:
                 usart.itube = FakeUSART()
                 print(f"[INFO] Patched {usart_name}.itube with FakeUSART")
             except Exception as e:
-                print(f"[WARNING] Could not replace {usart_name}.itube: {e}")
+                print(f"[ERROR] Could not replace {usart_name}.itube: {e}")
 
             try:
                 usart.recv_from_user = lambda *args, **kwargs: 0x00
                 print(f"[INFO] Patched {usart_name}.recv_from_user to return 0x00")
             except Exception as e:
-                print(f"[WARNING] Could not patch {usart_name}.recv_from_user: {e}")
+                print(f"[ERROR] Could not patch {usart_name}.recv_from_user: {e}")
 
         except Exception as e:
-            print(f"[WARNING] Could not patch {usart_name}: {e}")
+            print(f"[ERROR] Could not patch {usart_name}: {e}")
 
     for hook_type in (
         UC_HOOK_MEM_READ_UNMAPPED,
@@ -527,51 +899,19 @@ def save_keys(ql, out_dir):
     if g_sk_addr is not None:
         sk = bytes(ql.mem.read(g_sk_addr, SIZE_SK))
         sk_path = os.path.join(out_dir, "sk.bin")
-        S_path = os.path.join(out_dir, "S.csv")
+        S_path = os.path.join(out_dir, "S", "S.csv")
 
         with open(sk_path, "wb") as f:
             f.write(sk)
-        S_path = os.path.join(out_dir, "S.csv")
+
         save_S_from_sk_csv(sk, S_path)
-        
+
         print(f"SK saved to {sk_path}")
         print(f"S saved to {S_path}")
 
     if g_keypair_done_addr is not None:
         done = ql.mem.read(g_keypair_done_addr, 1)[0]
         print(f"g_keypair_done = {done}")
-
-def save_S_from_sk_csv(sk, S_path):
-    """
-    Save S in a csv file by extracting S from sk = s || seed_A || b || S || pkh and based on the code S is 2 bytes! 
-    """
-    before_S = s_length+ SEED_A_length + b_length
-    S = sk[before_S: before_S + S_length]
-
-    if len(S) != S_length:
-        raise ValueError(f"S has wrong size: {len(S)} != {S_length}")
-
-    os.makedirs(os.path.dirname(S_path), exist_ok=True)
-
-    with open(S_path, "w", newline="") as f:
-        writer = csv.writer(f)
-
-        header = ["row"] + [f"S_col_{j}" for j in range(PARAMS_NBAR)]
-        writer.writerow(header)
-
-        for i in range(PARAMS_N):
-            row = []
-            for j in range(PARAMS_NBAR):
-                offset = 2 * (i * PARAMS_NBAR + j)
-
-                value = int.from_bytes(
-                    S[offset:offset + 2], #because it is saved as 2 bits 
-                    byteorder="little",
-                    signed=True
-                )
-                row.append(value)
-            writer.writerow([i] + row)
-    print(f"S matrix saved as CSV to {S_path}")
 
 
 # -------------------------- XS TRACE SAVE --------------------------
@@ -596,12 +936,6 @@ def write_trace_csv(path, ins_list, reg_list):
 
 
 def save_xs_csvs(run_index):
-    """
-    The output looks like: output_dir/trace_i_j.csv and output_dir_trim/trace_i_j.csv
-    where:
-      i = run index
-      j = xs call index or the column or S that is exploited 
-    """
     global trace_saved
 
     if trace_saved:
@@ -615,6 +949,7 @@ def save_xs_csvs(run_index):
         write_trace_csv(trim_path, xs_ins_traces[xs_id], xs_reg_traces[xs_id])
 
     trace_saved = True
+
 
 # -------------------------- SNAPSHOT HOOK --------------------------
 
@@ -655,7 +990,7 @@ def snapshot_tracing(ql, address, size):
         try:
             ql.mem.write(mem_ptr, b"\x00" * n)
         except Exception as e:
-            print(f"[WARNING] clear_bytes failed: {e}")
+            print(f"[ERROR] clear_bytes failed: {e}")
 
         ql.arch.regs.write("pc", ql.arch.regs.read("lr"))
         return
@@ -730,7 +1065,7 @@ def decapsulation_tracing(ql, address, size):
         try:
             ql.mem.write(mem_ptr, b"\x00" * n)
         except Exception as e:
-            print(f"[WARNING IN DECAPSULATION] clear_bytes failed: {e}")
+            print(f"[ERROR IN DECAPSULATION] clear_bytes failed: {e}")
 
         ql.arch.regs.write("pc", ql.arch.regs.read("lr"))
         return
@@ -744,25 +1079,31 @@ def decapsulation_tracing(ql, address, size):
     if not trace_started:
         return
 
-    # Enter mul_bs
     if mul_bs_addr and address == mul_bs_addr:
         in_mul_bs = True
         xs_call_counter = 0
         print(f"[MUL_BS START] Entered mul_bs at {hex(address)}")
 
-    # Enter xs
     if in_mul_bs and xs_addr and address == xs_addr and not active_xs:
         active_xs_id = xs_call_counter % PARAMS_NBAR
         active_xs_return_addr = normalize_addr(ql.arch.regs.read("lr"))
         active_xs = True
+
         print(
             f"[XS START] xs_call={xs_call_counter}, "
             f"xs_id={active_xs_id}, "
             f"return={hex(active_xs_return_addr)}"
         )
+
         xs_call_counter += 1
 
-    # Leave xs
+        if active_xs_id >= PARAMS_NBAR:
+            print(f"[ERROR] Ignoring unexpected xs_call={xs_call_counter - 1}")
+            active_xs = False
+            active_xs_id = None
+            active_xs_return_addr = None
+            return
+
     if active_xs and active_xs_return_addr is not None and address == active_xs_return_addr:
         print(f"[XS END] xs_id={active_xs_id}")
         active_xs = False
@@ -770,14 +1111,12 @@ def decapsulation_tracing(ql, address, size):
         active_xs_return_addr = None
         return
 
-    # Record only inside xs
     if active_xs and active_xs_id is not None:
         ins, arg = disasm(ql, address)
         regs_now = [ql.arch.regs.read(r) for r in REG_NAMES]
         xs_ins_traces[active_xs_id].append([ins, arg])
         xs_reg_traces[active_xs_id].append(regs_now)
 
-    # Normal stop
     if trigger_low_addr and address == trigger_low_addr and not hit_trigger_low:
         hit_trigger_low = True
         print(f"trigger_low() at {hex(address)}")
@@ -786,7 +1125,6 @@ def decapsulation_tracing(ql, address, size):
         hard_stop(ql)
         raise StopEmulation("xs-product traces captured")
 
-    # Backup stop
     if dec_return_addr is not None and address == dec_return_addr:
         print(f"[BACKUP STOP] Returned from crypto_kem_dec to {hex(address)}")
         save_xs_csvs(current_run_index)
@@ -838,7 +1176,7 @@ def run_decapsulation_worker(worker_args):
     output_dir_trim   = output_dir_trim_local
     global_output_dir = output_dir_local
 
-    md                = make_disasm()
+    md = make_disasm()
 
     os.makedirs(output_dir, exist_ok=True)
     os.makedirs(output_dir_trim, exist_ok=True)
@@ -851,39 +1189,36 @@ def run_decapsulation_worker(worker_args):
 
     restore_snapshot_manual(ql, snapshot)
 
-    # address where crypto_kem_dec returns
     dec_return_addr = normalize_addr(snapshot["regs"]["lr"])
-    print(f"[WORKER run={run_index_local + 1} fault={fault_index_local}] Backup return address = {hex(dec_return_addr)}")
+
+    print(
+        f"[WORKER run={run_index_local + 1} fault={fault_index_local}] "
+        f"Backup return address = {hex(dec_return_addr)}"
+    )
 
     del snapshot
 
-    # each run has its own base ciphertext 
-    c1_initial, altered_ct = modify_ciphertext_c1(run_index_local, fault_index_local)
+    base_ct = load_base_ciphertext(run_index_local)
 
-    test_modify_ciphertext_c1(
-        run_index_local,
-        fault_index_local,
-        c1_random=c1_initial,
-        ct=altered_ct
-    )
+    ql.mem.write(g_ct_addr, bytes(base_ct))
 
-    ql.mem.write(g_ct_addr, bytes(altered_ct))
     print(
         f"[WORKER run={run_index_local + 1} fault={fault_index_local}] "
-        f"Modified CT written to g_ct ({hex(g_ct_addr)})"
+        f"Base CT written unchanged to g_ct ({hex(g_ct_addr)})"
     )
 
-    # Save one ciphertext per run as ciphertext_i.bin 
-    # where i = running index 
     ct_path = get_ciphertext_path(run_index_local)
 
     with open(ct_path, "wb") as f:
-        f.write(altered_ct)
+        f.write(base_ct)
 
     print(
         f"[WORKER run={run_index_local} fault={fault_index_local}] "
         f"ciphertext saved to {ct_path}"
     )
+
+    # Save B from the exact ciphertext used in this run
+    save_B_from_ciphertext_csv(base_ct, get_B_csv_path(run_index_local))
 
     ql.hook_code(decapsulation_tracing)
 
@@ -902,6 +1237,11 @@ def run_decapsulation_worker(worker_args):
     except Exception as e:
         print(f"Error during decapsulation (run={run_index_local + 1} fault={fault_index_local}): {e}")
         traceback.print_exc()
+
+    # B should be the same for every xs_id
+    save_and_check_B_from_registers_from_traces(run_index_local)
+    # S is reconstructed from registers and should match the S extracted from sk 
+    save_and_check_S_from_traces(run_index_local)
 
     print(f"\nSummary for run {run_index_local}, fault index {fault_index_local}:")
     print(f"  trigger_high hit = {hit_trigger_high}")
@@ -998,7 +1338,6 @@ if __name__ == "__main__":
     crypto_kem_dec_addr = normalize_addr(get_label_address(elf_file, "crypto_kem_dec"))
     trigger_low_addr    = normalize_addr(get_label_address(elf_file, "trigger_low"))
 
-    # For xs product
     mul_bs_addr = normalize_addr(get_label_address(elf_file, "mul_bs"))
     xs_addr     = normalize_addr(get_label_address(elf_file, "xs"))
 
@@ -1023,7 +1362,15 @@ if __name__ == "__main__":
             print(f"[ERROR] No snapshot found at {snapshot_path}")
             print("Run without --skip-snapshot first.")
             sys.exit(1)
+
         print(f"[SKIP SNAPSHOT] Loading existing snapshot from {snapshot_path}")
+        sk_path = os.path.join(output_dir, "sk.bin")
+        if os.path.exists(sk_path):
+            with open(sk_path, "rb") as f:
+                sk = f.read()
+            save_S_from_sk_csv(sk, os.path.join(get_S_dir(), "S.csv"))
+        else:
+            print(f"[ERROR] Missing sk.bin, cannot refresh S/S.csv: {sk_path}")
 
     else:
         print("------------------------------")
@@ -1058,7 +1405,6 @@ if __name__ == "__main__":
         if not os.path.exists(snapshot_path):
             print(f"[ERROR] Snapshot file was not created at {snapshot_path}")
             sys.exit(1)
-
 
     print("-------------------------------")
     print(f"Starting {num_runs} runs with {len(fault_indices)} fault indices = {total_tasks} tasks")
