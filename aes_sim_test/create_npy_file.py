@@ -80,6 +80,83 @@ def create_grouped_npy_files(name_npy_file, folder, leakage_model, cols):
     print(f"Finished creating grouped files for {leakage_model}")
 
 
+def create_sample_npy_files(name_npy_file, folder, leakage_model, cols):
+    """
+    Create one .npy file per run from trace_{run}_{fault}.csv inputs.
+    Rows inside each .npy are ordered by fault index.
+    """
+    def parse_trace_name(path):
+        match = re.match(r"trace_(\d+)_(\d+)\.csv$", path.name)
+        if match is None:
+            return None
+        run_index = int(match.group(1))
+        fault_index = int(match.group(2))
+        return run_index, fault_index
+
+    print(f"Creating sample simulation traces for model: {leakage_model}")
+    os.makedirs(name_npy_file, exist_ok=True)
+
+    files = []
+    for file in Path(folder).glob("trace_*_*.csv"):
+        parsed = parse_trace_name(file)
+        if parsed is None:
+            continue
+        run_index, fault_index = parsed
+        files.append((run_index, fault_index, file))
+
+    files.sort(key=lambda item: (item[0], item[1]))
+    print(f"Found {len(files)} sample trace files")
+
+    traces_by_run = {}
+    trace_order_rows = []
+
+    for count, (run_index, fault_index, file) in enumerate(files):
+        if count % 100 == 0:
+            print(f"Trace {count} has been converted")
+
+        if leakage_model == "HW":
+            trace = create_HW_trace(file, cols)
+        elif leakage_model == "HD":
+            trace = create_HD_trace(file, cols)
+        else:
+            raise ValueError("leakage_model must be 'HW' or 'HD'")
+
+        traces_by_run.setdefault(run_index, []).append((fault_index, trace))
+        trace_order_rows.append({
+            "run_index": run_index,
+            "fault_index": fault_index,
+            "trace_csv": file.name,
+            "trace_path": str(file),
+        })
+
+        print(f"Run {run_index}, fault {fault_index} -> {file.name}")
+
+    trace_order_df = pd.DataFrame(trace_order_rows)
+    trace_order_path = os.path.join(name_npy_file, f"{leakage_model}_sample_order.csv")
+    trace_order_df.to_csv(trace_order_path, index=False)
+    print(f"Saved trace order debug file: {trace_order_path}")
+
+    for run_index, rows in sorted(traces_by_run.items()):
+        rows.sort(key=lambda item: item[0])
+        fault_indices = [fault_index for fault_index, _ in rows]
+        min_len = min(len(trace) for _, trace in rows)
+        vectors_array = np.array([trace[:min_len] for _, trace in rows])
+
+        output_path = os.path.join(name_npy_file, f"{leakage_model}_run_{run_index}.npy")
+        np.save(output_path, vectors_array)
+
+        fault_order_path = os.path.join(name_npy_file, f"{leakage_model}_run_{run_index}_fault_order.csv")
+        pd.DataFrame({"row": range(len(fault_indices)), "fault_index": fault_indices}).to_csv(
+            fault_order_path,
+            index=False,
+        )
+
+        print(f"Saved {output_path} with shape {vectors_array.shape}")
+        print(f"Saved fault order file: {fault_order_path}")
+
+    print(f"Finished creating sample files for {leakage_model}")
+
+
 def create_npy_file_truncated(name_npy_file, folder, leakage_model, cols):
     """
     create one .npy file per xs_id from trace_{run}_{xs}.csv inputs 

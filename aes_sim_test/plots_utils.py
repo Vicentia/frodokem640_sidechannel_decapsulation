@@ -337,7 +337,7 @@ def return_instruction_type(instruction):
     return "other"
 
 
-def plot_trace_with_arithmetic(csv_path, selected_registers, result_dir=None):
+def plot_trace_with_arithmetic(csv_path, selected_registers, result_dir=None, no_instructions=None):
     df = pd.read_csv(csv_path)
     df.fillna("0x0", inplace=True)
 
@@ -351,6 +351,7 @@ def plot_trace_with_arithmetic(csv_path, selected_registers, result_dir=None):
 
     plt.close("all")
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(30, 10), sharex=True)
+    plt.xlim(0, no_instructions)
 
     ax1.plot(hw_trace, alpha=0.7, label="HW trace")
     ax1.scatter(arithmetic_idx_hw, hw_trace[arithmetic_idx_hw], s=10, label="Arithmetic instructions")

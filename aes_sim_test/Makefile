@@ -30,7 +30,6 @@ JOBS_TRUNCATED            = 10
 OUTPUT_DIR_TRUNCATED      = output_decapsulation_truncated
 OUTPUT_DIR_TRUNCATED_TRIM = output_decapsulation_truncated_TRIM
 
-
 # for derivation of the indexes
 INDICES := $(shell $(PYTHON) -c "print(' '.join(str(i) for i in range($(N))))")
 
@@ -47,13 +46,12 @@ all_sequential:
 	@mkdir -p $(OUTPUT_DIR_SEQUENTIAL) $(OUTPUT_DIR_SEQUENTIAL_TRIM)
 	@for i in $(INDICES); do \
 		echo "Trace $$i initialised"; \
-		mkdir -p $(OUTPUT_DIR_SEQUENTIAL)/TRACE_$$i; \
 		$(PYTHON) $(SCRIPT_SEQUENTIAL) \
 			--elf-file $(ELF_FILE) \
 			--fault-index $$i \
 			--output-dir $(OUTPUT_DIR_SEQUENTIAL) \
 			--output-dir-trim $(OUTPUT_DIR_SEQUENTIAL_TRIM) \
-			> $(OUTPUT_DIR_SEQUENTIAL)/TRACE_$$i/output_decapsulation_trace_$$i.txt 2>&1; \
+			> $(OUTPUT_DIR_SEQUENTIAL)/output_decapsulation_trace_$$i.txt 2>&1; \
 		echo "Trace $$i completed"; \
 	done
 	@echo "All sequential traces collected — see $(OUTPUT_DIR_SEQUENTIAL) and $(OUTPUT_DIR_SEQUENTIAL_TRIM)"
@@ -163,8 +161,22 @@ all_truncated:
 	@echo "----------------"
 	@echo "Truncated run ended."
 
-# Running all 
-all: all_sequential all_parallel all_sample all_truncated 
+# Running all
+all:
+	@echo "make all started: $$(date)"
+	@echo "Starting sequential..."
+	@$(MAKE) all_sequential
+	@echo "Sequential finished: $$(date)"
+	@echo "Starting parallel..."
+	@$(MAKE) all_parallel
+	@echo "Parallel finished: $$(date)"
+	@echo "Starting sample..."
+	@$(MAKE) all_sample
+	@echo "Sample finished: $$(date)"
+	@echo "Starting truncated..."
+	@$(MAKE) all_truncated
+	@echo "Truncated finished: $$(date)"
+	@echo "make all finished: $$(date)"
 
 # clean
 clean_sequential:

@@ -1,43 +1,43 @@
 #!/usr/bin/env python3
 
 import os
-import csv
 import sys
 import argparse
 import traceback
 
-from qiling.core import Qiling
-from qiling.const import QL_ARCH, QL_OS, QL_VERBOSE
-from qiling.extensions.mcu.stm32f4 import stm32f407
-from capstone import Cs, CS_ARCH_ARM, CS_MODE_THUMB
-from elftools.elf.elffile import ELFFile
-
-# Parameters for FrodoKEM-640
-PARAMS_N               = 640
-PARAMS_NBAR            = 8
-PARAMS_LOGQ            = 15
-CRYPTO_CIPHERTEXTBYTES = 9720
-BYTES_CIPHERTEXT_C1    = (PARAMS_LOGQ * PARAMS_N    * PARAMS_NBAR) // 8
-BYTES_CIPHERTEXT_C2    = (PARAMS_LOGQ * PARAMS_NBAR * PARAMS_NBAR) // 8
-
-# sk lengths 
-s_length               = 16
-SEED_A_length          = 16 
-b_length               = 9600 
-S_length               = PARAMS_N * PARAMS_NBAR * 2
-pkh                    = 16 
-
-
-SIZE_PK = 9616
-SIZE_SK = 19888
-SIZE_CT = 9720
-
-REG_NAMES = [
-    'r0', 'r1', 'r2', 'r3',
-    'r4', 'r5', 'r6', 'r7',
-    'r8', 'r9', 'r10', 'r11',
-    'r12', 'sp', 'lr', 'pc'
-]
+from path_helpers import get_flat_ct_modified_path, get_flat_trace_csv_path, get_flat_trim_csv_path
+from ciphertext_creation import (
+    load_base_ciphertext as load_base_ciphertext_from_path,
+    modify_ciphertext_c1_from_base,
+    save_B_from_ciphertext_csv,
+    test_modify_ciphertext_c1,
+)
+from stop_tracing import SnapshotReady, StopEmulation, hard_stop
+from tracing import save_current_trace, reset_trace_state, save_keys_from_qiling
+from parameters_initialisation import (
+    BYTES_CIPHERTEXT_C1,
+    BYTES_CIPHERTEXT_C2,
+    CRYPTO_CIPHERTEXTBYTES,
+    PARAMS_LOGQ,
+    PARAMS_N,
+    PARAMS_NBAR,
+    REG_NAMES,
+    SIZE_CT,
+    SIZE_PK,
+    SIZE_SK,
+    SEED_A_length,
+    S_length,
+    b_length,
+    pkh,
+    s_length,
+)
+from emulator_helpers import (
+    disasm_with,
+    get_label_address,
+    make_disasm,
+    normalize_addr,
+    setup_qiling_instance,
+)
 
 # -------------------------- PATH CONFIGURATION --------------------------
 
@@ -51,7 +51,7 @@ REG_NAMES = [
 
 # -------------------------- GLOBAL VARIABLES ----------------------------
 
-md = Cs(CS_ARCH_ARM, CS_MODE_THUMB)
+md = make_disasm()
 
 ins_trace = []
 reg_trace = []
@@ -93,335 +93,32 @@ current_traces_dir = None
 # Whether PK/SK have already been saved 
 keypair_saved = False
 
-def get_trace_dir(index):
-    return os.path.join(output_dir, f"TRACE_{index}")
-
-def get_trace_csv_path(index):
-    return os.path.join(get_trace_dir(index), f"trace_{index}.csv")
-
-def get_ct_modified_path(index):
-    return os.path.join(get_trace_dir(index), f"ct_modified_{index}.bin")
-
-# ---------------------- RESET --------------------
-def reset_globals():
-    global hit_main, hit_kem_keypair, hit_crypto_kem_dec
-    global hit_trigger_high, hit_trigger_low
-    global trace_started, trace_saved, instr_counter
-    global address_PK, address_SK, address_CT
-    global ins_trace, reg_trace
-
-    hit_main           = False
-    hit_kem_keypair    = False
-    hit_crypto_kem_dec = False
-    hit_trigger_high   = False
-    hit_trigger_low    = False
-    trace_started      = False
-    trace_saved        = False
-    instr_counter      = 0
-    address_PK         = None
-    address_SK         = None
-    address_CT         = None
-    ins_trace.clear()
-    reg_trace.clear()
-
-# --------------------- EXCEPTIONS -----------------
-# Exception to stop the emulator
-class StopEmulation(Exception):
-    pass
-
-
-# --------------------- HELPERS FOR CIPHERTEXT --------------------------
-
-def generate_base_ciphertext():
-    os.makedirs(output_dir, exist_ok=True)
-
-    c1_random = os.urandom(BYTES_CIPHERTEXT_C1)
-    c2        = bytes(BYTES_CIPHERTEXT_C2)
-    salt      = bytes(CRYPTO_CIPHERTEXTBYTES - BYTES_CIPHERTEXT_C1 - BYTES_CIPHERTEXT_C2)
-    base_ct   = c1_random + c2 + salt
-
-    with open(ct_base_path, "wb") as f:
-        f.write(base_ct)
-
-    print(f"[INFO] Base ciphertext created at {ct_base_path}")
-    return base_ct
-
-
-def load_base_ciphertext():
-    if not os.path.exists(ct_base_path):
-        return generate_base_ciphertext()
-
-    with open(ct_base_path, "rb") as f:
-        ct_base = f.read()
-
-    if len(ct_base) != CRYPTO_CIPHERTEXTBYTES:
-        raise StopEmulation(
-            f"[ERROR] Base ciphertext has wrong size: {len(ct_base)} != {CRYPTO_CIPHERTEXTBYTES}"
-        )
-
-    print(f"[INFO] Loaded base ciphertext from {ct_base_path}")
-    return ct_base
-
-
-def zero_bits(data, start, D):
-    for bit in range(start, start + D):
-        byte_pos = bit >> 3
-        bit_pos  = 7 - (bit & 7)
-        data[byte_pos] &= ~(1 << bit_pos)
-
-
-def modify_ciphertext_c1(index):
-    ct_random  = load_base_ciphertext()
-    c1_random  = ct_random[:BYTES_CIPHERTEXT_C1]
-    c1_altered = bytearray(c1_random)
-
-    for ind in range(index):
-        for i in range(PARAMS_NBAR):
-            start = (i * PARAMS_N + ind) * PARAMS_LOGQ
-            zero_bits(c1_altered, start, PARAMS_LOGQ)
-
-    c2   = ct_random[BYTES_CIPHERTEXT_C1 : BYTES_CIPHERTEXT_C1 + BYTES_CIPHERTEXT_C2]
-    salt = ct_random[BYTES_CIPHERTEXT_C1 + BYTES_CIPHERTEXT_C2 :]
-
-    return bytes(c1_random), bytes(c1_altered) + c2 + salt
-
-
-def unpack_c1(c1):
-    values = []
-    for i in range(PARAMS_NBAR):
-        for j in range(PARAMS_N):
-            start = (i * PARAMS_N + j) * PARAMS_LOGQ
-            val   = 0
-            for bit in range(PARAMS_LOGQ):
-                byte_pos = (start + bit) >> 3
-                bit_pos  = 7 - ((start + bit) & 7)
-                val |= ((c1[byte_pos] >> bit_pos) & 1) << bit
-            values.append(val)
-    return values
-
-
-def test_modify_ciphertext_c1(index, c1_random=None, ct=None):
-    if c1_random is None or ct is None:
-        c1_random, ct = modify_ciphertext_c1(index)
-    c1_altered = ct[:BYTES_CIPHERTEXT_C1]
-
-    random_vals = unpack_c1(c1_random)
-    altered_vals = unpack_c1(c1_altered)
-
-    # Test 1.1: check size of c1
-    if len(c1_random) != BYTES_CIPHERTEXT_C1:
-        raise StopEmulation(
-            f"[ERROR] The size of c1_random {len(c1_random)} does not match expected {BYTES_CIPHERTEXT_C1}"
-        )
-    # Test 1.2: check size of ct
-    if len(ct) != CRYPTO_CIPHERTEXTBYTES:
-        raise StopEmulation(
-            f"[ERROR] The size of ct {len(ct)} does not match expected {CRYPTO_CIPHERTEXTBYTES}"
-        )
-    
-    # Test 2: check that the first index columns are zeroed and the rest are unchanged
-    for ind in range(index):
-        for i in range(PARAMS_NBAR):
-            val = altered_vals[i * PARAMS_N + ind]
-            if val != 0:
-                raise StopEmulation(
-                    f"[ERROR] The first {index} columns should be zeroed, "
-                    f"but column {ind} row {i} is not zero: {val}"
-                )
-    # Test 3: check that columns from index onward are unchanged
-    for ind in range(index, PARAMS_N):
-        for i in range(PARAMS_NBAR):
-            if altered_vals[i * PARAMS_N + ind] != random_vals[i * PARAMS_N + ind]:
-                raise StopEmulation(
-                    f"[ERROR] Column {ind} row {i} was changed unexpectedly"
-                )
-            
-    # Test 4: check that the sum of all values in c1 is consistent with the zeroing
-    q            = 1 << PARAMS_LOGQ
-    total_sum    = sum(random_vals) % q
-    removed_sum  = sum(
-        random_vals[i * PARAMS_N + ind]
-        for ind in range(index)
-        for i in range(PARAMS_NBAR)
-    ) % q
-    new_sum  = sum(altered_vals) % q
-    expected = (total_sum - removed_sum) % q
-
-    if new_sum != expected:
-        raise StopEmulation(f"[ERROR] Sum check failed: {new_sum} != {expected}")
-
-    print(f"[TEST PASSED] Ciphertext modification for index {index} is correct")
-
-
-# ---------------------- HELPERS FOR EMULATOR ---------------------------
-
-def normalize_addr(addr):
-    if addr is None:
-        return None
-    return addr - 1 if (addr & 1) else addr
-
-
-def get_label_address(elf_file, function_name):
-    print(f"Looking for symbol: {function_name}")
-    with open(elf_file, "rb") as f:
-        elf = ELFFile(f)
-        for section in elf.iter_sections():
-            if section.name == ".symtab":
-                for symbol in section.iter_symbols():
-                    if symbol.name == function_name:
-                        addr = symbol["st_value"]
-                        print(f"Found {function_name} at {hex(addr)}")
-                        return addr
-    print(f"Symbol not found: {function_name}")
-    return None
-
-
-def initialize_emulator():
-    ql = Qiling(
-        [elf_file],
-        archtype=QL_ARCH.CORTEX_M,
-        ostype=QL_OS.MCU,
-        env=stm32f407,
-        verbose=QL_VERBOSE.OFF
-    )
-
-    ql.hw.create("usart1")
-    ql.hw.create("usart2")
-    ql.hw.create("rcc")
-    ql.hw.create("gpioa")
-
-    try:
-        ql.mem.map(0x50060800, 0x400, info="RNG", perms=3)
-        ql.mem.write(0x50060800, b"\x00" * 0x400)
-    except Exception:
-        pass
-
-    return ql
-
-
-def disasm(ql, address):
-    bytecode = ql.mem.read(address, 4)
-    for insn in md.disasm(bytecode, address):
-        return [insn.mnemonic, insn.op_str]
-    return ["<unknown>", ""]
-
-
-def save_csv(file_name):
-    global trace_saved
-
-    if trace_saved:
-        return
-
-    print(f"Saving trace to {file_name}")
-    print(f"Trace length: {len(ins_trace)} instructions")
-
-    with open(file_name, "w", newline="") as csvfile:
-        writer_csv = csv.writer(csvfile)
-        writer_csv.writerow([
-            "pc", "instruction", "operands",
-            "r0", "r1", "r2", "r3", "r4", "r5", "r6", "r7",
-            "r8", "r9", "r10", "r11", "r12", "sp", "lr", "pc"
-        ])
-
-        for ins_info, regs in zip(ins_trace, reg_trace):
-            regs_hex = [hex(x) for x in regs]
-            writer_csv.writerow([regs_hex[-1], ins_info[0], ins_info[1]] + regs_hex)
-
-    # Trimmed trace
-    os.makedirs(output_dir_trim, exist_ok=True)
-    trim_file_name = os.path.join(output_dir_trim, f"trace_{fault_index}.csv")
-
-    with open(trim_file_name, "w", newline="") as csvfile_trim:
-        writer_trim = csv.writer(csvfile_trim)
-        writer_trim.writerow(REG_NAMES[:-1]) 
-        for regs in reg_trace:
-            writer_trim.writerow([hex(x) for x in regs[:-1]])  
-
-    print(f"Trimmed trace saved to {trim_file_name}")
-    
-    trace_saved = True
-    print("Trace saved")
-
-
 def save_keypair(ql):
     global keypair_saved
 
     if keypair_saved:
         return
 
-    os.makedirs(output_dir, exist_ok=True)
-
-    if g_pk_addr is not None:
-        pk = ql.mem.read(g_pk_addr, SIZE_PK)
-        with open(pk_path, "wb") as f:
-            f.write(pk)
-        print(f"PK saved to {pk_path}")
-
-    if g_sk_addr is not None:
-        sk = ql.mem.read(g_sk_addr, SIZE_SK)
-        with open(sk_path, "wb") as f:
-            f.write(sk)
-        S_path = os.path.join(output_dir, "S.csv")
-        save_S_from_sk_csv(sk, S_path)
-        print(f"SK saved to {sk_path}")
-        print(f"S saved to {S_path}")
-
-    if g_keypair_done_addr is not None:
-        done = ql.mem.read(g_keypair_done_addr, 1)[0]
-        print(f"g_keypair_done = {done}")
-
+    save_keys_from_qiling(ql, output_dir, g_pk_addr, g_sk_addr, g_keypair_done_addr)
     keypair_saved = True
-
-def save_S_from_sk_csv(sk, S_path):
-    """
-    Save S in a csv file by extracting S from sk = s || seed_A || b || S || pkh and based on the code S is 2 bytes! 
-    """
-    before_S = s_length+ SEED_A_length + b_length
-    S = sk[before_S: before_S + S_length]
-
-    if len(S) != S_length:
-        raise ValueError(f"S has wrong size: {len(S)} != {S_length}")
-
-    os.makedirs(os.path.dirname(S_path), exist_ok=True)
-
-    with open(S_path, "w", newline="") as f:
-        writer = csv.writer(f)
-
-        header = ["row"] + [f"S_col_{j}" for j in range(PARAMS_NBAR)]
-        writer.writerow(header)
-
-        for i in range(PARAMS_N):
-            row = []
-            for j in range(PARAMS_NBAR):
-                offset = 2 * (i * PARAMS_NBAR + j)
-
-                value = int.from_bytes(
-                    S[offset:offset + 2], #because it is saved as 2 bits 
-                    byteorder="little",
-                    signed=True
-                )
-                row.append(value)
-            writer.writerow([i] + row)
-    print(f"S matrix saved as CSV to {S_path}")
 
 
 def save_ciphertext(ql, index):
-
-    trace_dir = get_trace_dir(index)
-    os.makedirs(trace_dir, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
 
     if g_ct_addr is not None:
         ct = ql.mem.read(g_ct_addr, SIZE_CT)
-        ct_path = get_ct_modified_path(index)
+        ct_path = get_flat_ct_modified_path(output_dir, index)
         with open(ct_path, "wb") as f:
             f.write(ct)
         print(f"CT saved to {ct_path}")
+        save_B_from_ciphertext_csv(bytes(ct), os.path.join(output_dir, "B", f"B_{index}.csv"))
 
-    save_csv(get_trace_csv_path(index))
+    save_current_trace(globals(), get_flat_trace_csv_path(output_dir, index), get_flat_trim_csv_path(output_dir_trim, index), output_dir, index)
 
 
 # Hooks
-def full_tracing(ql: Qiling, address: int, size: int) -> None:
+def full_tracing(ql, address, size):
     global hit_main, hit_kem_keypair, hit_crypto_kem_dec
     global hit_trigger_high, hit_trigger_low
     global trace_started, address_PK, address_SK, address_CT
@@ -435,7 +132,7 @@ def full_tracing(ql: Qiling, address: int, size: int) -> None:
         ql.arch.regs.write("pc", ql.arch.regs.read("lr"))
         return
 
-    ins, arg = disasm(ql, address)
+    ins, arg = disasm_with(ql, md, address)
 
     if instr_counter % 10000 == 0:
         print(
@@ -481,7 +178,8 @@ def full_tracing(ql: Qiling, address: int, size: int) -> None:
         print(f"ct ptr = {hex(ct_ptr)}  "
               f"(overwriting with altered ciphertext for index {fault_index})")
 
-        c1_initial, altered_ct = modify_ciphertext_c1(fault_index)
+        base_ct = load_base_ciphertext_from_path(ct_base_path)
+        c1_initial, altered_ct = modify_ciphertext_c1_from_base(base_ct, fault_index)
         test_modify_ciphertext_c1(fault_index, c1_random=c1_initial, ct=altered_ct)
         ql.mem.write(ct_ptr, bytes(altered_ct))
 
@@ -502,7 +200,11 @@ def full_tracing(ql: Qiling, address: int, size: int) -> None:
         raise StopEmulation("Trace captured, stopping emulator")
 
 
-if __name__ == "__main__":
+def main():
+    global elf_file, fault_index, output_dir, output_dir_trim
+    global pk_path, sk_path, ct_base_path, current_traces_dir, skip, md
+    global main_addr, kem_keypair_addr, trigger_high_addr, crypto_kem_dec_addr, trigger_low_addr
+    global g_pk_addr, g_sk_addr, g_ct_addr, g_keypair_done_addr
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--elf-file", 
@@ -534,8 +236,6 @@ if __name__ == "__main__":
     ct_base_path    = os.path.join(output_dir, "ct_base.bin")
 
 
-    trace_dir   = get_trace_dir(fault_index)
-
     print("Initialisation checks:")
     print("-----------------------")
     print("Starting script")
@@ -559,15 +259,12 @@ if __name__ == "__main__":
     g_ct_addr           = get_label_address(elf_file, "g_ct")
     g_keypair_done_addr = get_label_address(elf_file, "g_keypair_done")
 
-    stm32f407["PPB"]["type"] = "memory"
-
-    os.makedirs(trace_dir, exist_ok=True)
     os.makedirs(output_dir, exist_ok=True)
     os.makedirs(output_dir_trim, exist_ok=True)
 
-    reset_globals()
+    reset_trace_state(globals(), include_main_flags=True)
 
-    ql = initialize_emulator()
+    ql = setup_qiling_instance(elf_file, patch_uart=False, include_bitband=False)
     ql.hook_code(full_tracing)
 
     print("-----------------------------")
@@ -586,3 +283,7 @@ if __name__ == "__main__":
     print(f"trigger_high hit   = {hit_trigger_high}")
     print(f"crypto_kem_dec hit = {hit_crypto_kem_dec}")
     print(f"trigger_low hit    = {hit_trigger_low}")
+
+
+if __name__ == "__main__":
+    main()
