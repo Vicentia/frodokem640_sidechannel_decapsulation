@@ -1,3 +1,6 @@
+import pandas as pd
+
+
 def print_code(df, index_1, count, registers=['PC','Ins','r0','r1','r2','r3','r4','r5','r6','r7','r8','r9','r10','r11','r12','sp','lr']):
     """
     select the rows between index_1 and index_2 from the 'filename' and print the PC, instruction and operands
@@ -84,7 +87,7 @@ def HD_rows(row1, row2):
    for (i,j) in zip(row1,row2):
      temp=myHD(int(i,16),int(j,16))
      diff.append(temp)
-   return np.sum(diff), diff
+   return sum(diff), diff
 #***********************************************************
 def return_HD_trace(df,index1,index2,sr=selected_registers):
     """Computes the HD trace, when given the dataframe of an execution file between two"""

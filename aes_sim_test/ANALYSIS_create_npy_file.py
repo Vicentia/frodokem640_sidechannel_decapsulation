@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 
-from HW_HD_utils import create_HW_trace, create_HD_trace
+from analysis_HW_HD_utils import create_HW_trace, create_HD_trace
 
 def create_npy_file(name_npy_file, folder, leakage_model, cols):
     """

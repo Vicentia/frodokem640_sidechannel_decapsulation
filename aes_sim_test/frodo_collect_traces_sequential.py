@@ -1,38 +1,14 @@
 #!/usr/bin/env python3
 
-import os
 import sys
 import argparse
 import traceback
+import os
+from functools import partial # for passing multiple arguments to pool.starmap
 
-from path_helpers import get_flat_ct_modified_path, get_flat_trace_csv_path, get_flat_trim_csv_path
-from ciphertext_creation import (
-    load_base_ciphertext as load_base_ciphertext_from_path,
-    modify_ciphertext_c1_from_base,
-    save_B_from_ciphertext_csv,
-    test_modify_ciphertext_c1,
-)
-from stop_tracing import SnapshotReady, StopEmulation, hard_stop
-from tracing import save_current_trace, reset_trace_state, save_keys_from_qiling
-from parameters_initialisation import (
-    BYTES_CIPHERTEXT_C1,
-    BYTES_CIPHERTEXT_C2,
-    CRYPTO_CIPHERTEXTBYTES,
-    PARAMS_LOGQ,
-    PARAMS_N,
-    PARAMS_NBAR,
-    REG_NAMES,
-    SIZE_CT,
-    SIZE_PK,
-    SIZE_SK,
-    SEED_A_length,
-    S_length,
-    b_length,
-    pkh,
-    s_length,
-)
-from emulator_helpers import (
-    disasm_with,
+from TRACE_stop_tracing import StopEmulation
+from TRACE_tracing import make_full_trace, reset_trace_state
+from TRACE_emulator_helpers import (
     get_label_address,
     make_disasm,
     normalize_addr,
@@ -92,112 +68,6 @@ current_traces_dir = None
 
 # Whether PK/SK have already been saved 
 keypair_saved = False
-
-def save_keypair(ql):
-    global keypair_saved
-
-    if keypair_saved:
-        return
-
-    save_keys_from_qiling(ql, output_dir, g_pk_addr, g_sk_addr, g_keypair_done_addr)
-    keypair_saved = True
-
-
-def save_ciphertext(ql, index):
-    os.makedirs(output_dir, exist_ok=True)
-
-    if g_ct_addr is not None:
-        ct = ql.mem.read(g_ct_addr, SIZE_CT)
-        ct_path = get_flat_ct_modified_path(output_dir, index)
-        with open(ct_path, "wb") as f:
-            f.write(ct)
-        print(f"CT saved to {ct_path}")
-        save_B_from_ciphertext_csv(bytes(ct), os.path.join(output_dir, "B", f"B_{index}.csv"))
-
-    save_current_trace(globals(), get_flat_trace_csv_path(output_dir, index), get_flat_trim_csv_path(output_dir_trim, index), output_dir, index)
-
-
-# Hooks
-def full_tracing(ql, address, size):
-    global hit_main, hit_kem_keypair, hit_crypto_kem_dec
-    global hit_trigger_high, hit_trigger_low
-    global trace_started, address_PK, address_SK, address_CT
-    global instr_counter
-    global skip
-    global fault_index
-
-    instr_counter += 1
-
-    if address == skip:
-        ql.arch.regs.write("pc", ql.arch.regs.read("lr"))
-        return
-
-    ins, arg = disasm_with(ql, md, address)
-
-    if instr_counter % 10000 == 0:
-        print(
-            f"[PROGRESS] instr={instr_counter} "
-            f"pc={hex(address)} sp={hex(ql.arch.regs.read('sp'))} "
-            f"lr={hex(ql.arch.regs.read('lr'))} "
-            f"ins={ins} {arg}"
-        )
-
-    if main_addr and address == main_addr and not hit_main:
-        hit_main = True
-        print(f"main() hit at {hex(address)}")
-
-    if kem_keypair_addr and address == kem_keypair_addr and not hit_kem_keypair:
-        hit_kem_keypair = True
-        address_PK = ql.arch.regs.read("r0")
-        address_SK = ql.arch.regs.read("r1")
-        print("----------------------------")
-        print("Entering keypair generation:")
-        print("----------------------------")
-        print(f"pk ptr = {hex(address_PK)}")
-        print(f"sk ptr = {hex(address_SK)}")
-        print("----------------------------")
-
-    # Save PK/SK as soon as keypair generation is done (detected at trigger_high,
-    # which fires right before the decapsulation measurement window begins)
-    if trigger_high_addr and address == trigger_high_addr and not hit_trigger_high:
-        hit_trigger_high = True
-        save_keypair(ql)       
-        trace_started = True
-        ins_trace.clear()
-        reg_trace.clear()
-        print(f"trigger_high() at {hex(address)}, trace starts")
-
-    if crypto_kem_dec_addr and address == crypto_kem_dec_addr and not hit_crypto_kem_dec:
-        hit_crypto_kem_dec = True
-        ct_ptr     = ql.arch.regs.read("r1")
-        address_CT = ct_ptr
-
-        print("----------------------------")
-        print("Entering decapsulation:")
-        print("----------------------------")
-        print(f"ct ptr = {hex(ct_ptr)}  "
-              f"(overwriting with altered ciphertext for index {fault_index})")
-
-        base_ct = load_base_ciphertext_from_path(ct_base_path)
-        c1_initial, altered_ct = modify_ciphertext_c1_from_base(base_ct, fault_index)
-        test_modify_ciphertext_c1(fault_index, c1_random=c1_initial, ct=altered_ct)
-        ql.mem.write(ct_ptr, bytes(altered_ct))
-
-    if trace_started:
-        regs_now = [ql.arch.regs.read(r) for r in REG_NAMES]
-        ins_trace.append([ins, arg])
-        reg_trace.append(regs_now)
-
-    if trigger_low_addr and address == trigger_low_addr and not hit_trigger_low:
-        hit_trigger_low = True
-        print(f"trigger_low() at {hex(address)}")
-        print(f"Instructions collected: {len(ins_trace)}")
-
-        save_ciphertext(ql, fault_index)
-
-        print("Stopping emulator")
-        ql.emu_stop()
-        raise StopEmulation("Trace captured, stopping emulator")
 
 
 def main():
@@ -265,7 +135,7 @@ def main():
     reset_trace_state(globals(), include_main_flags=True)
 
     ql = setup_qiling_instance(elf_file, patch_uart=False, include_bitband=False)
-    ql.hook_code(full_tracing)
+    ql.hook_code(partial(make_full_trace, namespace=globals()))
 
     print("-----------------------------")
     print("Running emulator...")

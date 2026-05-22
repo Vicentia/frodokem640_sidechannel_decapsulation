@@ -4,7 +4,7 @@ import os
 import numpy as np
 import pandas as pd
 
-from parameters_initialisation import (
+from TRACE_parameters_initialisation import (
     PARAMS_N,
     PARAMS_NBAR,
     REG_ALIAS,
@@ -13,7 +13,7 @@ from parameters_initialisation import (
     b_length,
     s_length,
 )
-from path_helpers import (
+from TRACE_path_helpers import (
     get_B_csv_path,
     get_B_dir,
     get_B_from_registers_csv_path,
@@ -21,7 +21,7 @@ from path_helpers import (
     get_S_csv_path,
     get_truncated_trim_csv_path,
 )
-from stop_tracing import StopEmulation
+from TRACE_stop_tracing import StopEmulation
 
 
 def save_S_from_sk_csv(sk, S_path):

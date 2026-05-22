@@ -1,7 +1,7 @@
 import csv
 import os
 
-from parameters_initialisation import (
+from TRACE_parameters_initialisation import (
     BYTES_CIPHERTEXT_C1,
     BYTES_CIPHERTEXT_C2,
     CRYPTO_CIPHERTEXTBYTES,
@@ -9,7 +9,7 @@ from parameters_initialisation import (
     PARAMS_N,
     PARAMS_NBAR,
 )
-from stop_tracing import StopEmulation
+from TRACE_stop_tracing import StopEmulation
 
 
 def generate_base_ciphertext(ct_path):

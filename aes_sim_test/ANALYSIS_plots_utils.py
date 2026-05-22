@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from HW_HD_utils import create_HD_trace, create_HW_trace
+from analysis_HW_HD_utils import create_HD_trace, create_HW_trace
 
 
 def reset_folder(folder_path):

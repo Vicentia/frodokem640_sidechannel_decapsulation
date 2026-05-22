@@ -5,15 +5,15 @@ def get_snapshot_path(output_dir):
     return os.path.join(output_dir, "snapshot.pkl")
 
 
-def get_flat_trace_csv_path(output_dir, index):
+def get_trace_csv_path(output_dir, index):
     return os.path.join(output_dir, f"trace_{index}.csv")
 
 
-def get_flat_trim_csv_path(output_dir_trim, index):
+def get_trim_csv_path(output_dir_trim, index):
     return os.path.join(output_dir_trim, f"trace_{index}.csv")
 
 
-def get_flat_ct_modified_path(output_dir, index):
+def get_ct_modified_path(output_dir, index):
     return os.path.join(output_dir, f"ct_modified_{index}.bin")
 
 

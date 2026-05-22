@@ -9,7 +9,7 @@ from unicorn import (
     UC_HOOK_MEM_WRITE_UNMAPPED,
 )
 
-from parameters_initialisation import REG_NAMES
+from TRACE_parameters_initialisation import REG_NAMES
 
 
 def normalize_addr(addr):

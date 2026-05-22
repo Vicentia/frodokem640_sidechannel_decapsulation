@@ -4,14 +4,15 @@ import sys
 import argparse
 import traceback
 import multiprocessing  # for running in parallel
+from functools import partial # for passing multiple arguments to pool.starmap
 
-from path_helpers import get_snapshot_path
-from ciphertext_creation import (
+from TRACE_path_helpers import get_snapshot_path
+from TRACE_ciphertext_creation import (
     load_base_ciphertext as load_base_ciphertext_from_path,
 )
-from stop_tracing import SnapshotReady, StopEmulation
-from tracing import make_snapshot_tracing, run_parallel_decapsulation_worker
-from emulator_helpers import (
+from TRACE_stop_tracing import SnapshotReady, StopEmulation
+from TRACE_tracing import make_snapshot_tracing, run_decapsulation_worker
+from TRACE_emulator_helpers import (
     get_label_address,
     make_disasm,
     normalize_addr,
@@ -180,7 +181,7 @@ def main():
         print("------------------------------")
         md = make_disasm()
         ql = setup_qiling_instance(elf_file)
-        ql.hook_code(make_snapshot_tracing(globals()))
+        ql.hook_code(partial(make_snapshot_tracing, namespace=globals()))
 
         try:
             ql.run()
@@ -237,7 +238,7 @@ def main():
 
     ctx = multiprocessing.get_context("spawn")
     with ctx.Pool(processes=jobs) as pool:
-        pool.map(run_parallel_decapsulation_worker, worker_args)
+        pool.starmap(run_decapsulation_worker, [(args, "parallel") for args in worker_args])
 
     print("\nAll traces have been collected successfully")
 
