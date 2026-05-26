@@ -117,9 +117,7 @@ int crypto_kem_enc(uint8_t *ct, uint8_t *ss, const uint8_t *pk) {
 
     sample_n(Sp, PARAMS_N * PARAMS_NBAR);
     sample_n(Bp, PARAMS_N * PARAMS_NBAR);
-    trigger_high();
     mul_add_sa_plus_e(Bp, Sp, pk_seedA);
-    trigger_low();
     pack(ct_c1, (PARAMS_LOGQ * PARAMS_N * PARAMS_NBAR) / 8, Bp, PARAMS_N * PARAMS_NBAR, PARAMS_LOGQ);
 
     // Generate Epp, and compute V = Sp*B + Epp

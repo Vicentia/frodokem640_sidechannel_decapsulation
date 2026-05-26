@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from analysis_HW_HD_utils import create_HD_trace, create_HW_trace
+from ANALYSIS_HW_HD_utils import create_HD_trace, create_HW_trace
 
 
 def reset_folder(folder_path):
@@ -31,13 +31,18 @@ def compute_correlation(traces, target_variable):
     return corr
 
 
-def plot_correlation(corr_array, title, save_path=None, figsize=(20, 6), no_instructions=None):
+def plot_correlation(corr_array,title,save_path=None, figsize=(20, 6), no_instructions=None, style="line", marker_size=None):
+
     plt.close("all")
     plt.figure(figsize=figsize)
     plt.xlim(0, no_instructions)
  
     for label, corr in sorted(corr_array.items()):
-        plt.plot(corr, label=label, alpha=0.8, linewidth=0.8)
+        x = np.arange(len(corr))
+        if style == "line":
+            plt.plot(x, corr, label=label, alpha=0.75, linewidth=0.8)
+        elif style == "points":
+            plt.scatter(x, corr, label=label, alpha=0.75, s=marker_size)
 
     plt.title(title)
     plt.xlabel("Instruction index")

@@ -13,12 +13,14 @@ from TRACE_parameters_initialisation import REG_NAMES
 
 
 def normalize_addr(addr):
+    """Normalize an address to be even, as Thumb code addresses are odd but we want to work with the actual instruction addresses"""
     if addr is None:
         return None
     return addr - 1 if (addr & 1) else addr
 
 
 def get_label_address(elf_file, function_name):
+    """Get the address of a function label from the ELF file, or return None if not found"""
     print(f"Looking for symbol: {function_name}")
 
     with open(elf_file, "rb") as f:
@@ -37,6 +39,7 @@ def get_label_address(elf_file, function_name):
 
 
 def make_disasm():
+    """Create a Capstone disassembler for ARM Thumb mode"""
     return Cs(CS_ARCH_ARM, CS_MODE_THUMB)
 
 
@@ -52,6 +55,7 @@ def disasm_with(ql, md, address):
 
 
 def save_snapshot_manual(ql):
+    """Save the snapshot of the current state of the emulator, including registers and memory regions, with manual filtering to avoid large or irrelevant regions"""
     print("Starting snapshot...")
 
     snapshot = {
@@ -73,9 +77,14 @@ def save_snapshot_manual(ql):
     for start, end, perms, label, _ in ql.mem.get_mapinfo():
         region_size = end - start
         label_str = str(label)
+        label_upper = label_str.upper()
 
-        if any(k in label_str.upper() for k in skip_label_keywords):
+        if any(k in label_upper for k in skip_label_keywords):
             print(f"[SKIP] Region {label}: {hex(start)}-{hex(end)}")
+            continue
+
+        if "SRAM" not in label_upper:
+            print(f"[SKIP NON-SRAM] Region {label}: {hex(start)}-{hex(end)}")
             continue
 
         if region_size > 0x400000:
@@ -94,6 +103,7 @@ def save_snapshot_manual(ql):
 
 
 def restore_snapshot_manual(ql, snapshot):
+    """Restore the snapshot of the emulator state, including registers and memory regions, with error handling to skip regions that cannot be restored"""
     for start, end, perms, label, data in snapshot["memory"]:
         try:
             ql.mem.write(start, data)
@@ -109,11 +119,13 @@ def restore_snapshot_manual(ql, snapshot):
 
 
 def hook_mem_invalid(uc, access, address, size, value, user_data):
+    """Hook for unmapped memory accesses, to log them and prevent crashes"""
     print(f"[UNMAPPED] access={access} addr={hex(address)} size={size} value={value}")
     return False
 
 
 def patch_usarts(ql):
+    """Patch the USART peripherals to prevent crashes due to unimplemented behavior, by replacing the itube with a fake one and patching recv_from_user to return 0x00"""
     class FakeUSART:
         def readable(self):
             return False
@@ -155,6 +167,7 @@ def patch_usarts(ql):
 
 
 def map_helper_regions(ql, include_bitband=True):
+    """Map additional memory regions that may be accessed by the firmware, such as bit-banding regions and RNG peripheral, to prevent crashes due to unmapped accesses"""
     if include_bitband:
         try:
             ql.mem.map(0x22000000, 0x02000000, info="SRAM_BITBAND_ALIAS", perms=3)
@@ -176,6 +189,7 @@ def map_helper_regions(ql, include_bitband=True):
 
 
 def setup_qiling_instance(elf_file, *, patch_uart=True, include_bitband=True):
+    """Set up the Qiling emulator instance for the STM32F407 firmware, with options to patch the USART peripherals and include bit-banding regions to prevent crashes due to unmapped accesses"""
     stm32f407["PPB"]["type"] = "memory"
 
     ql = Qiling(
@@ -206,6 +220,7 @@ def setup_qiling_instance(elf_file, *, patch_uart=True, include_bitband=True):
 
 
 def resolve_decapsulation_symbols(elf_file, *, include_mul_xs=False):
+    """Resolve the addresses of key functions and variables related to the decapsulation process from the ELF file, to be used for setting up hooks and analyzing the execution flow during emulation"""
     trigger_setup_addr = normalize_addr(get_label_address(elf_file, "trigger_setup"))
     init_uart_addr = normalize_addr(get_label_address(elf_file, "init_uart"))
 

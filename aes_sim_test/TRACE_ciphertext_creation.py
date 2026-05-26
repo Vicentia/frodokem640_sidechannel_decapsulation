@@ -1,4 +1,5 @@
 import csv
+import hashlib
 import os
 
 from TRACE_parameters_initialisation import (
@@ -13,6 +14,7 @@ from TRACE_stop_tracing import StopEmulation
 
 
 def generate_base_ciphertext(ct_path):
+    """Generate a random ciphertext as ct = c1_random + c2 + salt, where c1_random is random, c2 is zero and salt is zero"""
     os.makedirs(os.path.dirname(ct_path), exist_ok=True)
 
     c1_random = os.urandom(BYTES_CIPHERTEXT_C1)
@@ -24,11 +26,13 @@ def generate_base_ciphertext(ct_path):
         f.write(base_ct)
 
     print(f"[INFO] Base ciphertext created at {ct_path}")
+    print(f"[INFO] Base ciphertext sha256 = {hashlib.sha256(base_ct).hexdigest()}")
     return base_ct
 
 
-def load_base_ciphertext(ct_path):
-    if not os.path.exists(ct_path):
+def load_base_ciphertext(ct_path, *, force_generate=False):
+    """Load the base ciphertext from file, or generate it if it doesn't exist."""
+    if force_generate or not os.path.exists(ct_path):
         return generate_base_ciphertext(ct_path)
 
     with open(ct_path, "rb") as f:
@@ -44,6 +48,7 @@ def load_base_ciphertext(ct_path):
 
 
 def zero_bits(data, start, D):
+    """Set D bits to zero in the bytearray data starting from bit index start"""
     for bit in range(start, start + D):
         byte_pos = bit >> 3
         bit_pos = 7 - (bit & 7)
@@ -51,6 +56,7 @@ def zero_bits(data, start, D):
 
 
 def modify_ciphertext_c1_from_base(base_ct, index):
+    """Modify the first index columns of c1 in the base ciphertext by zeroing the corresponding bits, and return both the original c1 and the modified ciphertext"""
     c1_random = base_ct[:BYTES_CIPHERTEXT_C1]
     c1_altered = bytearray(c1_random)
 
@@ -87,6 +93,7 @@ def unpack_c1(c1):
 
 
 def test_modify_ciphertext_c1(index, c1_random=None, ct=None):
+    """Sanity check"""
     if c1_random is None or ct is None:
         raise ValueError("c1_random and ct must be provided")
 
@@ -138,6 +145,7 @@ def test_modify_ciphertext_c1(index, c1_random=None, ct=None):
 
 
 def save_B_from_ciphertext_csv(ct, B_path):
+    """Extract the B matrix values from c1 of the ciphertext and save them as a CSV file"""
     c1 = ct[:BYTES_CIPHERTEXT_C1]
     B_values = unpack_c1(c1)
     os.makedirs(os.path.dirname(B_path), exist_ok=True)

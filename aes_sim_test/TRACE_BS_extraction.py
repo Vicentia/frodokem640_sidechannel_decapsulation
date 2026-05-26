@@ -15,9 +15,12 @@ from TRACE_parameters_initialisation import (
 )
 from TRACE_path_helpers import (
     get_B_csv_path,
+    get_B_valid_csv_path,
     get_B_dir,
     get_B_from_registers_csv_path,
+    get_B_valid_from_registers_csv_path,
     get_B_packed_from_registers_csv_path,
+    get_B_valid_packed_from_registers_csv_path,
     get_S_csv_path,
     get_truncated_trim_csv_path,
 )
@@ -25,6 +28,7 @@ from TRACE_stop_tracing import StopEmulation
 
 
 def save_S_from_sk_csv(sk, S_path):
+    """ extract S from sk and turn it into a csv """
     before_S = s_length + SEED_A_length + b_length
     S = sk[before_S: before_S + S_length]
 
@@ -47,6 +51,7 @@ def save_S_from_sk_csv(sk, S_path):
 
 
 def load_S_vectors_from_sk_file(sk_path):
+    """ extract S from sk and return as numpy array """
     if not os.path.exists(sk_path):
         print(f"[ERROR] Missing sk.bin, cannot compare S against key: {sk_path}")
         return None
@@ -68,6 +73,7 @@ def canonical_reg(reg):
 
 
 def split_u32_to_i16_pair(x):
+    """Split a 32-bit unsigned integer into two 16-bit signed integers."""
     x = int(x, 0) & 0xffffffff
     low = x & 0xffff
     high = (x >> 16) & 0xffff
@@ -81,6 +87,7 @@ def split_u32_to_i16_pair(x):
 
 
 def extract_smlad_operands(trace_csv_path):
+    """Extract B packed, B unpacked and S values from registers for all smlad instructions in the trace."""
     df = pd.read_csv(trace_csv_path)
     df.fillna("0x0", inplace=True)
 
@@ -118,8 +125,13 @@ def extract_smlad_operands(trace_csv_path):
     )
 
 
-def extract_B_from_registers_matrix_from_trace(output_dir_trim, run_index, xs_id):
-    trace_path = get_truncated_trim_csv_path(output_dir_trim, run_index, xs_id)
+def extract_B_from_registers_matrix_from_trace(output_dir_trim, run_index, xs_id, valid=False, fault_index=None):
+    """Check the length and return B packed and unpacked as matrices of shape (PARAMS_NBAR, PARAMS_N//2) and (PARAMS_NBAR, PARAMS_N)"""
+    trace_path = (
+        os.path.join(output_dir_trim, f"trace_valid_{run_index}_{xs_id}.csv")
+        if valid
+        else get_truncated_trim_csv_path(output_dir_trim, run_index, xs_id, fault_index)
+    )
 
     B_packed, B_from_registers, S_from_registers = extract_smlad_operands(trace_path)
 
@@ -146,8 +158,13 @@ def extract_B_from_registers_matrix_from_trace(output_dir_trim, run_index, xs_id
     )
 
 
-def save_and_check_B_from_registers_from_traces(output_dir, output_dir_trim, run_index):
-    B_csv_path = get_B_csv_path(output_dir, run_index)
+def save_and_check_B_from_registers_from_traces(output_dir, output_dir_trim, run_index, valid=False, fault_index=None):
+    """ Compare if B extracted from registers matches the B from ciphertext and is consistent across all xs traces"""
+    B_csv_path = (
+        get_B_valid_csv_path(output_dir, run_index)
+        if valid
+        else get_B_csv_path(output_dir, run_index, fault_index)
+    )
 
     if not os.path.exists(B_csv_path):
         print(f"[MISSING CSV] {B_csv_path} does not exist")
@@ -162,7 +179,11 @@ def save_and_check_B_from_registers_from_traces(output_dir, output_dir_trim, run
     total_checks = 0
 
     for xs_id in range(PARAMS_NBAR):
-        trace_path = get_truncated_trim_csv_path(output_dir_trim, run_index, xs_id)
+        trace_path = (
+            os.path.join(output_dir_trim, f"trace_valid_{run_index}_{xs_id}.csv")
+            if valid
+            else get_truncated_trim_csv_path(output_dir_trim, run_index, xs_id, fault_index)
+        )
 
         if not os.path.exists(trace_path):
             print(f"[ERROR] Trace does not exist, cannot extract raw B: {trace_path}")
@@ -172,6 +193,8 @@ def save_and_check_B_from_registers_from_traces(output_dir, output_dir_trim, run
             output_dir_trim,
             run_index,
             xs_id,
+            valid=valid,
+            fault_index=fault_index,
         )
 
         if B_packed_matrix is None or B_matrix is None:
@@ -196,7 +219,7 @@ def save_and_check_B_from_registers_from_traces(output_dir, output_dir_trim, run
                 mismatch = np.where(B_row != B_expected[b_row])
                 raise StopEmulation(
                     f"[B CHECK ERROR] run={run_index} xs_id={xs_id} B_row={b_row} "
-                    f"does not match B_{run_index}.csv. first mismatches={mismatch}"
+                    f"does not match {os.path.basename(B_csv_path)}. first mismatches={mismatch}"
                 )
 
             if not matches_reference:
@@ -219,7 +242,11 @@ def save_and_check_B_from_registers_from_traces(output_dir, output_dir_trim, run
 
     os.makedirs(get_B_dir(output_dir), exist_ok=True)
 
-    B_output_path = get_B_from_registers_csv_path(output_dir, run_index)
+    B_output_path = (
+        get_B_valid_from_registers_csv_path(output_dir, run_index)
+        if valid
+        else get_B_from_registers_csv_path(output_dir, run_index, fault_index)
+    )
     B_from_registers_df = pd.DataFrame(
         reference_B,
         columns=[f"B_col_{i}" for i in range(PARAMS_N)],
@@ -227,7 +254,11 @@ def save_and_check_B_from_registers_from_traces(output_dir, output_dir_trim, run
     B_from_registers_df.insert(0, "row", range(PARAMS_NBAR))
     B_from_registers_df.to_csv(B_output_path, index=False)
 
-    B_packed_output_path = get_B_packed_from_registers_csv_path(output_dir, run_index)
+    B_packed_output_path = (
+        get_B_valid_packed_from_registers_csv_path(output_dir, run_index)
+        if valid
+        else get_B_packed_from_registers_csv_path(output_dir, run_index, fault_index)
+    )
     B_packed_from_registers_df = pd.DataFrame(
         reference_B_packed,
         columns=[f"B_pair_{i}" for i in range(PARAMS_N // 2)],
@@ -243,7 +274,8 @@ def save_and_check_B_from_registers_from_traces(output_dir, output_dir_trim, run
     )
 
 
-def save_and_check_S_from_traces(output_dir, output_dir_trim, run_index):
+def save_and_check_S_from_traces(output_dir, output_dir_trim, run_index, fault_index=None, valid=False):
+    """ Compare if S extracted from registers matches the S from sk and is consistent across all xs traces"""
     S_expected = load_S_vectors_from_sk_file(os.path.join(output_dir, "sk.bin"))
 
     if S_expected is None:
@@ -255,7 +287,11 @@ def save_and_check_S_from_traces(output_dir, output_dir_trim, run_index):
     total_checks = 0
 
     for xs_id in range(PARAMS_NBAR):
-        trace_path = get_truncated_trim_csv_path(output_dir_trim, run_index, xs_id)
+        trace_path = (
+            os.path.join(output_dir_trim, f"trace_valid_{run_index}_{xs_id}.csv")
+            if valid
+            else get_truncated_trim_csv_path(output_dir_trim, run_index, xs_id, fault_index)
+        )
 
         if not os.path.exists(trace_path):
             print(f"[ERROR] Trace does not exist, cannot extract S: {trace_path}")
@@ -325,6 +361,7 @@ def save_and_check_S_from_traces(output_dir, output_dir_trim, run_index):
 
 
 def compare_B_ciphertext_vs_trace(output_dir, output_dir_trim, run_index, xs_id):
+    """ Compare if B extracted from registers matches the B from ciphertext for a specific trace"""
     B_csv_path = get_B_csv_path(output_dir, run_index)
     trace_path = get_truncated_trim_csv_path(output_dir_trim, run_index, xs_id)
 
@@ -379,7 +416,7 @@ def compare_B_ciphertext_vs_trace(output_dir, output_dir_trim, run_index, xs_id)
 
 
 def save_register_operands_csv(trace_csv_path, output_dir, label):
-    """Extract B packed, B unpacked and S from registers"""
+    """Save B packed, B unpacked and S from registers"""
     B_packed, B_unpacked, S_values = extract_smlad_operands(trace_csv_path)
 
     B_dir = os.path.join(output_dir, "B")
@@ -387,8 +424,17 @@ def save_register_operands_csv(trace_csv_path, output_dir, label):
     os.makedirs(B_dir, exist_ok=True)
     os.makedirs(S_dir, exist_ok=True)
 
-    packed_path = os.path.join(B_dir, f"B_from_registers_packed_{label}.csv")
-    unpacked_path = os.path.join(B_dir, f"B_from_registers_{label}.csv")
+    if str(label).startswith("valid_"):
+        suffix = str(label).replace("valid_", "", 1)
+        packed_path = os.path.join(B_dir, f"B_valid_from_registers_packed_{suffix}.csv")
+        unpacked_path = os.path.join(B_dir, f"B_valid_from_registers_{suffix}.csv")
+    elif str(label) == "valid":
+        packed_path = os.path.join(B_dir, "B_valid_from_registers_packed.csv")
+        unpacked_path = os.path.join(B_dir, "B_valid_from_registers.csv")
+    else:
+        packed_path = os.path.join(B_dir, f"B_from_registers_packed_{label}.csv")
+        unpacked_path = os.path.join(B_dir, f"B_from_registers_{label}.csv")
+
     S_path = os.path.join(S_dir, f"S_{label}.csv")
 
     one_xs_packed_len = PARAMS_NBAR * (PARAMS_N // 2)

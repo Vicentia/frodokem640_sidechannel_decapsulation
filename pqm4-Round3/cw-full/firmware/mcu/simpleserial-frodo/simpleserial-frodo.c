@@ -28,10 +28,8 @@ int main(void)
     // g_pk_check = simple_sum(g_pk, CRYPTO_PUBLICKEYBYTES);
     // g_sk_check = simple_sum(g_sk, CRYPTO_SECRETKEYBYTES);
     g_keypair_done = 1;
-    // trigger_high();
-    //crypto_kem_enc(g_ct, g_ss, g_pk);
+    crypto_kem_enc(g_ct, g_ss, g_pk);
     crypto_kem_dec(g_ss, g_ct, g_sk);
-    // trigger_low();
 
     while (1) {
     }
