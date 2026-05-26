@@ -28,7 +28,6 @@ trace_*.csv
 trace_*_*.csv
 
 # numpy/results
-Results_*/
 *.npy
 # Firmware generated files
 firmware/*.lock
