@@ -75,9 +75,9 @@ To clean up generated output:
 ```bash
 # Clean traces (sequential, parallel, sample or all)
 make clean_sequential 
-clean_parallel
-clean_sample
-clean_truncated
+make clean_parallel
+make clean_sample
+make clean_truncated
 clean
 ```
 
@@ -111,11 +111,12 @@ The firmware is built using the FrodoKEM API from the `pqm4` repository. The ins
 | `frodo_collect_traces_parallel.py` | Collects traces in parallel across N fault indices |
 | `frodo_collect_traces_sample.py` | Collects multiple independent runs across a fixed set of fault indices |
 | `frodo_collect_traces_truncated.py` | Collects subtraces for 80 different ciphertexts |
+| `[TRACE] FrodoKEM-640.ipynb` | Notebook that collects all the modes and the number of the traces ir the default indices can be changed|
 
 
 All scripts (other than the sequantial one that does not use a snapshot because it is not needed) follow the same two-phase flow:
-1. **Snapshot phase** — runs key generation (`crypto_kem_keypair`) and stops at the entry of `crypto_kem_dec`, saving the emulator state (registers + memory) to `snapshot.pkl`, along with the public key, secret key and matrix S (that is encouded in sk) as a csv file in the matrix shape (640 by 8). 
-2. **Decapsulation phase** — restores the snapshot, writes a (possibly modified) ciphertext into the emulator's memory, and records the instruction + register trace between `trigger_high` and `trigger_low`.
+1. **Snapshot phase** — runs key generation (`crypto_kem_keypair`) and stops at the entry of `crypto_kem_dec`, saving the emulator state (registers + memory) to `snapshot.pkl`, along with the public key, secret key and matrix S (that is encouded in sk) as a csv file in the matrix shape (640 by 8). It also runs the encapsulation that creates a valid ciphertext that is different for every run. It saved this ciphertext as `ct_valid_<i>`, were i is the index of the run.
+2. **Decapsulation phase** — restores the snapshot, writes a (possibly modified or valid) ciphertext into the emulator's memory, and records the instruction + register trace between `trigger_high` and `trigger_low`. If the mode of the ciphertext is valid, then it does not overwrite the addres of the ciphertext that has been obtained for encapsulation. If the mode is modified, then it rewrites it by using `ct_base_<i>` where i is the index. 
 
 ---
 
@@ -167,7 +168,7 @@ JOBS_TRUNCATED            = 10
 OUTPUT_DIR_TRUNCATED      = output_decapsulation_truncated
 OUTPUT_DIR_TRUNCATED_TRIM = output_decapsulation_truncated_TRIM
 ```
-
+**Notebook - [TRACE] FrodoKEM-640.ipynb** - everything can be changed from the notebook and it is easier o run and see the live results instead of the terminal
 > Each fault index controls how many columns of the C_1 component of the FrodoKEM ciphertext are zeroed out before decapsulation.
 
 > **Warning:** The number of traces, the number of jobs, the fault indicies or the outputfiles should all be changed in the Makefile. 
@@ -178,14 +179,14 @@ OUTPUT_DIR_TRUNCATED_TRIM = output_decapsulation_truncated_TRIM
 
 | Target | Description |
 |--------|-------------|
-| `make all_sequential` | Runs `N` sequential traces |
-| `make snapshot_parallel` | Runs keygen and saves snapshot for parallel mode |
-| `make decap_parallel` | Runs `N_PARALLEL` decapsulations in parallel (requires snapshot) |
+| `make all_sequential` | Runs `N` sequential traces and it generates one valid ciphertext|
+| `make snapshot_parallel` | Runs keygen, saves snapshot for parallel mode and it generates one valid ciphertext |
+| `make decap_parallel` | Runs `N_PARALLEL` decapsulations in parallel (requires snapshot) and also the decapsulation for the valid ciphertext |
 | `make all_parallel` | Runs `snapshot_parallel` then `decap_parallel` |
-| `make snapshot_sample` | Runs keygen and saves snapshot for sample mode |
-| `make decap_sample` | Runs all sample traces (requires snapshot) |
-| `make snapshot_truncated` | Runs keygen and saves snapshot for truncated mode |
-| `make decap_truncated` | Runs all truncated traces (requires snapshot) |
+| `make snapshot_sample` | Runs keygen, saves snapshot for sample mode and generates one valid ciphertext per run|
+| `make decap_sample` | Runs all sample traces (requires snapshot) and also the decapsulation for the valid ciphertext|
+| `make snapshot_truncated` | Runs keygen, saves snapshot for truncated mode and generates one valid ciphertext per run |
+| `make decap_truncated` | Runs all truncated traces (requires snapshot) and also the decapsulation for the valid ciphertext|
 | `make all_truncated` | Runs `snapshot_sample` then `decap_sample` |
 | `make all` | Runs `all_sequential` `all_parallel` `all_sample` |
 | `make clean_sequential` | Deletes sequential output directories |
@@ -202,13 +203,20 @@ Traces are collected one by one, iterating over fault indices `0` through `N-1`.
  
 ```
 output_decapsulation_sequential/
-|-- Trace_i/
-    |--ct_modified_i.bin # Modified ciphertext with first i columns zeroed
-    |--output_decapsulation_trace_i.txt # Log of executed instructions and addresses hit during key generation and decapsulation
-    |--trace_i.csv # Captured power trace (first i index modified)
+|-- B/ #folder for all B' extracted/created from ciphertext
+    |-- B_<i> / B_valid # value of B' / B'_valid where i is the index of the fault index
+    |--B_from_register_<i> / B_valid_from_registers # value of B'/B'_valid extracted from the smlad instruction for fault index i 
+    |--B_from_registers_packed_<i> / B_valid_from_registers_packed # value of B'/B'_valid packed extracted from the registers where one values has 32bits and it encodes 2 values of 16 bits, e.g b_0_packed= b_1 || b_0
+|-- S / # folder for saving S
+    |-- S_<i> # S extracted from smlad instruction where i is the index of the ciphertext
+    |-- S_valid_<i> # S extracted from smald insstructions for the valid cipherext
+    |-- S.csv # S extracted from sk
+|-- ct_base.bin # Base ciphertext from where ct_modified_<i> will be derived 
+|-- ct_modified_<i>.bin # Modified ciphertext with first i columns zeroed
+|-- output_decapsulation_trace_i.txt # Log of executed instructions and addresses hit during key generation and decapsulation
+|-- trace_i.csv # Captured power trace (first i index modified)
 |-- pk.bin # Public key saved after key generation
 |-- sk.bin # Private key saved after key generation
-|-- S.csv # matrix S as csv file 
 ```
  
 A trimmed version of each trace is saved to `output_decapsulation_sequential_TRIM/`.
@@ -221,15 +229,23 @@ A single keygen is performed first and saved as a snapshot, then `N_PARALLEL` de
  
 ```
 output_decapsulation_parallel/
+|-- B/ #folder for all B' extracted/created from ciphertext
+    |-- B_<i> / B_valid # value of B' / B'_valid where i is the index of the fault index
+    |--B_from_register_<i> / B_valid_from_registers # value of B'/B'_valid extracted from the smlad instruction for fault index i 
+    |--B_from_registers_packed_<i> / B_valid_from_registers_packed # value of B'/B'_valid packed extracted from the registers where one values has 32bits and it encodes 2 values of 16 bits, e.g b_0_packed= b_1 || b_0
+|-- S / # folder for saving S
+    |-- S_<i> # S extracted from smlad instruction where i is the index of the ciphertext
+    |-- S_valid_<i> # S extracted from smald insstructions for the valid cipherext
+    |-- S.csv # S extracted from sk
 |-- ct_base.bin # Base ciphertext used for all fault injections
+|-- ct_modified_i.bin # Ciphertext with first i columns modified
+|-- ct_valid.bin # Valid ciphertext 
 |-- keygen_snapshot_log.txt # Instruction log from key generation up to the multiplication in the decapsulation phase
 |-- snapshot.pkl # snapshotwith keygen until multiplication that is saved on the disk
 |-- pk.bin # Public key saved after key generation
 |-- sk.bin # Private key saved after key generation
-|-- S.csv # matrix S as csv file 
-|-- Trace_i/
-    |-- ct_modified_i.bin # Ciphertext with first i columns modified
-    |-- trace_i.csv # Captured power trace
+|-- trace_<j>.csv # Trace for fault index j
+|-- trace_valid_0.csv # Trace for valid ciphertext 
 ```
  
 A trimmed version of each trace is saved to `output_decapsulation_parallel_TRIM/`.
@@ -242,15 +258,25 @@ Similar to the parallel version, but traces are collected for a set of fault ind
  
 ```
 output_decapsulation_sample/
+|-- B/ #folder for all B' extracted/created from ciphertext
+    |-- B_<i> / B_valid_<i> # value of B' / B'_valid where i is the index of the fault index
+    |--B_from_register_<i> / B_valid_from_registers # value of B'/B'_valid extracted from the smlad instruction for fault index i 
+    |--B_from_registers_packed_<i> / B_valid_from_registers_packed # value of B'/B'_valid packed extracted from the registers where one values has 32bits and it encodes 2 values of 16 bits, e.g b_0_packed= b_1 || b_0
+|-- S / # folder for saving S
+    |-- S_<i> # S extracted from smlad instruction where i is the index of the ciphertext
+    |-- S_valid_<i> # S extracted from smald insstructions for the valid cipherext
+    |-- S.csv # S extracted from sk
+|-- ct_base_<i> # Base ciphertext used for fault injections where i is the run index
+|-- ct_modified_<i>_<j>.bin # Modified ciphertext where i represents the run index and j represent the fault index
+|-- ct_valid_<i> # Valid ciphertext for run i
+|-- pk_<i>.bin # Public key for run i
+|-- sk_<i>.bin # Secret key for run i 
 |-- keygen_snapshot_log.txt # Instruction log from key generation up to the multiplication
-|-- snapshot.pkl # snapshotwith keygen until multiplication that is saved on the disk
-|-- pk.bin # Public key
-|-- sk.bin # Private key
-|-- S.csv # matrix S as csv file 
-|-- Run_i/ # i-th run (with a fresh random ciphertext)
-    |-- Trace_j/ # j is the fault index (number of zeroed columns)
-        |-- ciphertext_j.bin # Ciphertext with j columns modified
-        |-- trace_j.csv # Captured power trace
+|-- snapshot_<i>.pkl # snapshotwith keygen until multiplication that is saved on the disk with run i
+|-- trace_<i>_<j> # trace for cipheretxt at run i with fault index j
+|-- trace_valid_<i> # trace for valid ciphertext for run i 
+
+
 ```
  
 Fault indices are configured via `FAULT_INDICES` (foe example `0 1 2 4 8 16 32 64 128 256 512`). A trimmed version of each trace is saved to `output_decapsulation_sample_TRIM/`.
@@ -263,14 +289,24 @@ This mode aims to capture every dot product. In FrodoKEM's decapsulation, the ma
  
 ```
 output_decapsulation_truncated/
-|--keygen_snapshot_log.txt # Instruction log from key generation up to the multiplication
-|--snapshot.pkl # snapshotwith keygen until multiplication that is saved on the disk
-|-- pk.bin # Public key
-|-- sk.bin # Private key
-|-- S.csv # matrix S as csv file 
-|-- trace_i_j.csv # Trace for the i-th run, targeting the j-th dot product
-                  # e.g. trace_5_2 = 5th ciphertext, 3rd dot product (0-indexed), which means that it exploits the third column of S
-|-- ciphertext_i.bin # Store the i-th randomly generated ciphertext 
+output_decapsulation_sample/
+|-- B/ #folder for all B' extracted/created from ciphertext
+    |-- B_<i> / B_valid_<i> # value of B' / B'_valid where i is the index of the fault index
+    |--B_from_register_<i> / B_valid_from_registers # value of B'/B'_valid extracted from the smlad instruction for fault index i 
+    |--B_from_registers_packed_<i> / B_valid_from_registers_packed # value of B'/B'_valid packed extracted from the registers where one values has 32bits and it encodes 2 values of 16 bits, e.g b_0_packed= b_1 || b_0
+|-- S / # folder for saving S
+    |-- S_<i> # S extracted from smlad instruction where i is the index of the ciphertext
+    |-- S_valid_<i> # S extracted from smald insstructions for the valid cipherext
+    |-- S.csv # S extracted from sk
+|-- ct_base_<i> # Base ciphertext used for fault injections where i is the run index
+|-- ct_modified_<i>_<j>.bin # Modified ciphertext where i represents the run index and j represent the fault index
+|-- ct_valid_<i> # Valid ciphertext for run i
+|-- pk_<i>.bin # Public key for run i
+|-- sk_<i>.bin # Secret key for run i 
+|-- keygen_snapshot_log.txt # Instruction log from key generation up to the multiplication
+|-- snapshot.pkl # snapshotwith keygen until multiplication that is saved on the disk
+|-- trace_<i>_<k>_<j> # trace for cipheretxt at run i with, targeting the k xs() dot products for ciphertext with fault index j
+|-- trace_valid_<i>_<k> # trace for valid ciphertext for run i, targeting the l xs() dot product 
 ```
 A trimmed version of each trace is saved to `output_decapsulation_truncated_TRIM/`.
  
@@ -313,5 +349,22 @@ All plots are saved to the relevant results directory (e.g. `Results_decapsulati
 | `snr_HW_combined.png` | All HW SNR for multiple indices |
 | `snr_HD_combined.png` | All HD SNR for multiple indices  |
 | `trace_with_arithmetic.png` | HW and HD with points when an arithmetic operation is hit |
+
+**Modes** - there are 4 modes for analysis: sequantial, parallel, sample, truncated and each of them have their dedicated notebook
+
+
+| Notebook name | What it shows |
+|---|---|
+| `[ANALYSIS] arithmetic_analysis.ipynb` | Plots points for every arithmetic instruction |
+| `[ANALYSIS] parallel_analysis.ipynb` | Plots the HW, HD comparison between parallel traces|
+| `[ANALYSIS] sample_analysis.ipynb` | Plots the HW, HD comparison between sample traces |
+| `[ANALYSIS] sequential_analysis.ipynb` | Plots the HW, HD comparison between sequantial traces |
+| `[ANALYSIS] truncated_analysis.ipynb` | Plots the HW, HD comparison between parallel traces and computes correlation between the traces and the value |
+
+**[ANALYSIS] truncated_analysis.ipynb** - Creates correlation between the target value and the actual value for the columns of B' and for S. Based on the correlation, it takes S from an interval and based on the value of S it receives a rank by comparing it with the actual S. 
+
+E.g if the correlation for value=3 is 1, S-guessed=3. If actual value of S=3, then rank=1. 
+
+E.g if the correlation for value=2 is 1 and the correlation for value =3 is 0.8 and there is no other value with a correlation bigger than value=3, S_guessed=2. If actual value of S=3, then rank=2. 
 
 
