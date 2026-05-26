@@ -210,7 +210,15 @@ def reset_trace_state(namespace, *, include_main_flags=False, include_xs=False):
         namespace["xs_reg_traces"] = [[] for _ in range(PARAMS_NBAR)]
 
 
-def save_keys_from_qiling(ql, out_dir, g_pk_addr=None, g_sk_addr=None, g_keypair_done_addr=None, key_index=None):
+def save_keys_from_qiling(
+    ql,
+    out_dir,
+    g_pk_addr=None,
+    g_sk_addr=None,
+    g_keypair_done_addr=None,
+    key_index=None,
+    save_s_csv=True,
+):
     """
     Save PK and SK from qiling memory, and also save S extracted from SK in csv format
     """
@@ -230,10 +238,11 @@ def save_keys_from_qiling(ql, out_dir, g_pk_addr=None, g_sk_addr=None, g_keypair
         with open(sk_path, "wb") as f:
             f.write(sk)
 
-        S_path = os.path.join(out_dir, "S", f"S{suffix}.csv")
-        save_S_from_sk_csv(sk, S_path)
         print(f"SK saved to {sk_path}")
-        print(f"S saved to {S_path}")
+        if save_s_csv:
+            S_path = os.path.join(out_dir, "S", f"S{suffix}.csv")
+            save_S_from_sk_csv(sk, S_path)
+            print(f"S saved to {S_path}")
 
     if g_keypair_done_addr is not None:
         done = ql.mem.read(g_keypair_done_addr, 1)[0]
@@ -328,6 +337,7 @@ def make_snapshot_tracing(ql, address, size, namespace):
             namespace.get("g_sk_addr"),
             namespace.get("g_keypair_done_addr"),
             namespace.get("key_index"),
+            namespace.get("save_key_s_csv", True),
         )
 
         valid_ct = bytes(ql.mem.read(namespace["address_CT"], SIZE_CT))
@@ -1298,7 +1308,7 @@ def prepare_worker_ciphertext(ql, config, mode):
 
     if mode == "truncated":
         ct_path = (
-            get_run_ciphertext_path(output_dir, run_index)
+            get_ct_valid_path(output_dir, run_index)
             if ciphertext_mode == "valid"
             else get_sample_ct_modified_path(output_dir, run_index, fault_index)
         )

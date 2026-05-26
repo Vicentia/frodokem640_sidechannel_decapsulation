@@ -115,12 +115,6 @@ def run_truncated_snapshot_worker(worker_args):
     ) = worker_args
 
     snapshot_path_local = get_sample_snapshot_path(output_dir_local, run_index)
-    key_output_dir = (
-        output_dir_local
-        if run_index == 0
-        else os.path.join(output_dir_local, "keys", f"run_{run_index}")
-    )
-
     namespace = {
         "md": make_disasm(),
         "main_addr": main_addr_local,
@@ -138,7 +132,9 @@ def run_truncated_snapshot_worker(worker_args):
         "g_keypair_done_addr": g_keypair_done_addr_local,
         "mul_bs_addr": mul_bs_addr_local,
         "xs_addr": xs_addr_local,
-        "global_output_dir": key_output_dir,
+        "global_output_dir": output_dir_local,
+        "key_index": run_index,
+        "save_key_s_csv": False,
         "output_dir": output_dir_local,
         "snapshot_path": snapshot_path_local,
         "snapshot_at": "crypto_kem_dec",
@@ -186,7 +182,16 @@ def run_truncated_snapshot_worker(worker_args):
 
     base_ct_path = get_run_ciphertext_path(output_dir_local, run_index)
     base_ct = load_base_ciphertext(base_ct_path, force_generate=True)
-    
+
+    if run_index == 0:
+        sk_path = os.path.join(output_dir_local, "sk_0.bin")
+        if os.path.exists(sk_path):
+            with open(sk_path, "rb") as f:
+                sk = f.read()
+            save_S_from_sk_csv(sk, os.path.join(get_S_dir(output_dir_local), "S.csv"))
+        else:
+            print(f"[WARNING] Missing {sk_path}, cannot save S/S.csv")
+
     save_B_from_ciphertext_csv(base_ct, os.path.join(output_dir_local, "B", f"B_base_{run_index}.csv"))
     return snapshot_path_local
 
@@ -329,13 +334,13 @@ def main():
             sys.exit(1)
 
         print(f"[SKIP SNAPSHOT] Loading existing per-run snapshots from {output_dir}")
-        sk_path = os.path.join(output_dir, "sk.bin")
+        sk_path = os.path.join(output_dir, "sk_0.bin")
         if os.path.exists(sk_path):
             with open(sk_path, "rb") as f:
                 sk = f.read()
             save_S_from_sk_csv(sk, os.path.join(get_S_dir(output_dir), "S.csv"))
         else:
-            print(f"[ERROR] Missing sk.bin, cannot refresh S/S.csv: {sk_path}")
+            print(f"[ERROR] Missing sk_0.bin, cannot refresh S/S.csv: {sk_path}")
 
     else:
         print("------------------------------")

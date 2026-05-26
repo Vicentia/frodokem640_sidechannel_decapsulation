@@ -105,8 +105,12 @@ def get_B_valid_packed_from_registers_csv_path(output_dir, run_index=None):
     return os.path.join(get_B_dir(output_dir), f"B_valid_from_registers_packed_{run_index}.csv")
 
 
-def get_S_csv_path(output_dir, run_index):
-    return os.path.join(get_S_dir(output_dir), f"S_{run_index}.csv")
+def get_S_csv_path(output_dir, run_index, fault_index=None, valid=False):
+    if valid:
+        return os.path.join(get_S_dir(output_dir), f"S_valid_{run_index}.csv")
+    if fault_index is None:
+        return os.path.join(get_S_dir(output_dir), f"S_{run_index}.csv")
+    return os.path.join(get_S_dir(output_dir), f"S_{run_index}_{fault_index}.csv")
 
 
 def get_S_from_sk_csv_path(output_dir):

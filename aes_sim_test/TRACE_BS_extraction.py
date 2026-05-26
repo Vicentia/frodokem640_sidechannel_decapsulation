@@ -53,7 +53,7 @@ def save_S_from_sk_csv(sk, S_path):
 def load_S_vectors_from_sk_file(sk_path):
     """ extract S from sk and return as numpy array """
     if not os.path.exists(sk_path):
-        print(f"[ERROR] Missing sk.bin, cannot compare S against key: {sk_path}")
+        print(f"[ERROR] Missing secret key file, cannot compare S against key: {sk_path}")
         return None
 
     with open(sk_path, "rb") as f:
@@ -276,7 +276,12 @@ def save_and_check_B_from_registers_from_traces(output_dir, output_dir_trim, run
 
 def save_and_check_S_from_traces(output_dir, output_dir_trim, run_index, fault_index=None, valid=False):
     """ Compare if S extracted from registers matches the S from sk and is consistent across all xs traces"""
-    S_expected = load_S_vectors_from_sk_file(os.path.join(output_dir, "sk.bin"))
+    sk_path = (
+        os.path.join(output_dir, f"sk_{run_index}.bin")
+        if os.path.exists(os.path.join(output_dir, f"sk_{run_index}.bin"))
+        else os.path.join(output_dir, "sk.bin")
+    )
+    S_expected = load_S_vectors_from_sk_file(sk_path)
 
     if S_expected is None:
         return
@@ -346,7 +351,7 @@ def save_and_check_S_from_traces(output_dir, output_dir_trim, run_index, fault_i
     for xs_id, S_vector in S_vectors:
         S_by_xs[xs_id] = S_vector
 
-    S_path = get_S_csv_path(output_dir, run_index)
+    S_path = get_S_csv_path(output_dir, run_index, fault_index=fault_index, valid=valid)
     os.makedirs(os.path.dirname(S_path), exist_ok=True)
     S_matrix = S_by_xs.T
     S_df = pd.DataFrame(S_matrix, columns=[f"S_col_{i}" for i in range(PARAMS_NBAR)])
