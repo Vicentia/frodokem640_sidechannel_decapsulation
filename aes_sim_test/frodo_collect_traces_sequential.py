@@ -68,7 +68,6 @@ instr_counter = 0
 fault_index        = 0
 current_traces_dir = None
 ciphertext_mode    = "modified"
-full_trace_max_instr = None
 
 # Whether PK/SK have already been saved 
 keypair_saved = False
@@ -76,7 +75,7 @@ keypair_saved = False
 
 def main():
     global elf_file, fault_index, output_dir, output_dir_trim
-    global ciphertext_mode, full_trace_max_instr
+    global ciphertext_mode
     global pk_path, sk_path, ct_base_path, current_traces_dir, skip, md
     global main_addr, kem_keypair_addr, trigger_high_addr, crypto_kem_enc_addr, crypto_kem_dec_addr, trigger_low_addr
     global randombytes_addr
@@ -107,12 +106,6 @@ def main():
         default="modified",
         help="Use the firmware-generated valid ciphertext or a modified ciphertext",
     )
-    parser.add_argument(
-        "--full-trace-max-instr",
-        type=int,
-        default=300_000_000,
-        help="Stop sequential tracing if trigger_low is not reached before this many instructions; use 0 to disable",
-    )
     args = parser.parse_args()
     
     elf_file = args.elf_file 
@@ -120,7 +113,6 @@ def main():
     output_dir      = args.output_dir
     output_dir_trim = args.output_dir_trim
     ciphertext_mode = args.ciphertext_mode
-    full_trace_max_instr = args.full_trace_max_instr or None
     pk_path        = os.path.join(output_dir, "pk.bin")
     sk_path         = os.path.join(output_dir, "sk.bin")
     ct_base_path    = os.path.join(output_dir, "ct_base.bin")
@@ -155,7 +147,6 @@ def main():
     print(f"crypto_kem_dec address = {hex(crypto_kem_dec_addr) if crypto_kem_dec_addr else None}")
     print(f"randombytes address    = {hex(randombytes_addr) if randombytes_addr else None}")
     print(f"ciphertext mode        = {ciphertext_mode}")
-    print(f"max instructions       = {full_trace_max_instr}")
 
     os.makedirs(output_dir, exist_ok=True)
     os.makedirs(output_dir_trim, exist_ok=True)

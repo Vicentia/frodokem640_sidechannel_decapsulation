@@ -84,7 +84,6 @@ snapshot_at         = "crypto_kem_dec"
 instr_counter = 0
 current_run_index   = 0
 current_fault_index = 0
-snapshot_max_instr = None
 use_host_randombytes = False
 
 # instruction and registers initialisation
@@ -110,7 +109,6 @@ def run_sample_snapshot_worker(worker_args):
         g_sk_addr_local,
         g_ct_addr_local,
         g_keypair_done_addr_local,
-        snapshot_max_instr_local,
         use_host_randombytes_local,
     ) = worker_args
 
@@ -137,7 +135,6 @@ def run_sample_snapshot_worker(worker_args):
         "snapshot_path": snapshot_path_local,
         "snapshot_at": "crypto_kem_dec",
         "snapshot_mode": "sample",
-        "snapshot_max_instr": snapshot_max_instr_local,
         "use_host_randombytes": use_host_randombytes_local,
         "snapshot_progress_interval": 100_000,
         "current_run_index": run_index,
@@ -193,7 +190,7 @@ def main():
     global trigger_high_addr, crypto_kem_enc_addr, crypto_kem_dec_addr, trigger_low_addr
     global randombytes_addr
     global g_pk_addr, g_sk_addr, g_ct_addr, g_keypair_done_addr, md
-    global snapshot_max_instr, current_run_index, use_host_randombytes
+    global current_run_index, use_host_randombytes
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--elf-file", 
@@ -243,12 +240,6 @@ def main():
         help="Use the firmware-generated ciphertext unchanged, or modify C1 before tracing"
     )
     parser.add_argument(
-        "--snapshot-max-instr",
-        type=int,
-        default=200_000_000,
-        help="Stop snapshot creation if crypto_kem_dec is not reached before this many instructions; use 0 to disable",
-    )
-    parser.add_argument(
         "--use-host-randombytes",
         action="store_true",
         help="Hook firmware randombytes() during crypto_kem_enc so valid ciphertexts differ across snapshots",
@@ -265,7 +256,6 @@ def main():
     fault_indices = args.fault_indices
     total_tasks   = num_runs * len(fault_indices)
     jobs          = args.jobs or max(total_tasks, num_runs, 1)
-    snapshot_max_instr = args.snapshot_max_instr or None
     use_host_randombytes = args.use_host_randombytes
 
     global_output_dir = output_dir
@@ -303,7 +293,6 @@ def main():
     print(f"[INFO] crypto_kem_enc address = {hex(crypto_kem_enc_addr) if crypto_kem_enc_addr else None}")
     print(f"[INFO] crypto_kem_dec address = {hex(crypto_kem_dec_addr) if crypto_kem_dec_addr else None}")
     print(f"[INFO] randombytes address = {hex(randombytes_addr) if randombytes_addr else None}")
-    print(f"[INFO] snapshot max instructions = {snapshot_max_instr}")
     print(f"[INFO] use host randombytes = {use_host_randombytes}")
 
     if args.skip_snapshot:
@@ -341,7 +330,6 @@ def main():
                 g_sk_addr,
                 g_ct_addr,
                 g_keypair_done_addr,
-                snapshot_max_instr,
                 use_host_randombytes,
             )
             for run_index in range(num_runs)

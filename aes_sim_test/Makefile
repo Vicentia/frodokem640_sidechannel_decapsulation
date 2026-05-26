@@ -4,8 +4,6 @@ SCRIPT_PARALLEL   = frodo_collect_traces_parallel.py
 SCRIPT_SAMPLE     = frodo_collect_traces_sample.py
 SCRIPT_TRUNCATED  = frodo_collect_traces_truncated.py
 ELF_FILE          = firmware/simpleserial-frodo-CW308_STM32F4.elf
-SNAPSHOT_MAX_INSTR = 200000000
-FULL_TRACE_MAX_INSTR = 300000000
 
 # Sequential 
 N = 2
@@ -66,7 +64,6 @@ sequential:
 			--output-dir $(OUTPUT_DIR_SEQUENTIAL) \
 			--output-dir-trim $(OUTPUT_DIR_SEQUENTIAL_TRIM) \
 			--ciphertext-mode modified \
-			--full-trace-max-instr $(FULL_TRACE_MAX_INSTR) \
 			> $(OUTPUT_DIR_SEQUENTIAL)/output_decapsulation_trace_$$i.txt 2>&1; \
 		echo "Trace $$i modified completed"; \
 	done
@@ -77,7 +74,6 @@ sequential:
 		--output-dir $(OUTPUT_DIR_SEQUENTIAL) \
 		--output-dir-trim $(OUTPUT_DIR_SEQUENTIAL_TRIM) \
 		--ciphertext-mode valid \
-		--full-trace-max-instr $(FULL_TRACE_MAX_INSTR) \
 		> $(OUTPUT_DIR_SEQUENTIAL)/output_decapsulation_trace_valid.txt 2>&1
 	@echo "Sequential valid reference completed"
 	@echo "All sequential traces collected — see $(OUTPUT_DIR_SEQUENTIAL) and $(OUTPUT_DIR_SEQUENTIAL_TRIM)"
@@ -93,7 +89,6 @@ snapshot_parallel:
 		--n 0 \
 		--output-dir $(OUTPUT_DIR_PARALLEL) \
 		--output-dir-trim $(OUTPUT_DIR_PARALLEL_TRIM) \
-		--snapshot-max-instr $(SNAPSHOT_MAX_INSTR) \
 		> $(OUTPUT_DIR_PARALLEL)/keygen_snapshot_log.txt 2>&1
 	@echo "Snapshot done"
 
@@ -137,7 +132,6 @@ snapshot_sample:
 		--jobs $(JOBS_SAMPLE) \
 		--output-dir $(OUTPUT_DIR_SAMPLE) \
 		--output-dir-trim $(OUTPUT_DIR_SAMPLE_TRIM) \
-		--snapshot-max-instr $(SNAPSHOT_MAX_INSTR) \
 		> $(OUTPUT_DIR_SAMPLE)/keygen_snapshot_log.txt 2>&1
 	@echo "Snapshot done"
 
@@ -177,7 +171,6 @@ snapshot_truncated:
 		--jobs $(JOBS_TRUNCATED) \
 		--output-dir $(OUTPUT_DIR_TRUNCATED) \
 		--output-dir-trim $(OUTPUT_DIR_TRUNCATED_TRIM) \
-		--snapshot-max-instr $(SNAPSHOT_MAX_INSTR) \
 		> $(OUTPUT_DIR_TRUNCATED)/keygen_snapshot_log.txt 2>&1
 	@echo "Snapshot done"
 
