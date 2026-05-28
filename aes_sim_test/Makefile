@@ -22,7 +22,7 @@ CIPHERTEXT_MODE_PARALLEL_VALID = valid
 
 # Sample 
 NUM_RUNS = 5
-FAULT_INDICES = 0 1 2 4 8 16 32 64 128 256 512
+FAULT_INDICES_MAX = 320
 JOBS_SAMPLE = 10
 OUTPUT_DIR_SAMPLE      = output_decapsulation_sample
 OUTPUT_DIR_SAMPLE_TRIM = output_decapsulation_sample_TRIM
@@ -31,7 +31,7 @@ CIPHERTEXT_MODE_SAMPLE_VALID = valid
 
 # Truncated 
 NUM_RUNS_TRUNCATED        = 80 
-FAULT_INDICES_TRUNCATED   = 0
+FAULT_INDICES_TRUNCATED   = $(shell $(PYTHON) -c "print(' '.join(str(i) for i in range(0, 321, 2)))")
 JOBS_TRUNCATED            = 10
 OUTPUT_DIR_TRUNCATED      = output_decapsulation_truncated
 OUTPUT_DIR_TRUNCATED_TRIM = output_decapsulation_truncated_TRIM

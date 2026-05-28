@@ -237,7 +237,7 @@ def save_list(filename, lst):
         - `lst (_type_)`: _description_
     """
     with open(filename, "w") as f:
-        f.write("\n".join(map(str, lst)))
+        f.write("\n".join(map(str, lst))) 
 #***********************************************************
 def load_list(filename):
     """## load list of integers from a file
