@@ -1,6 +1,6 @@
 # FrodoKEM Trace Collection
 
-FrodoKEM-640 decapsulation traces, captured by using STM32F4 target, [Qiling](https://github.com/qilingframework/qiling) and [ChipWisperer enviorment](https://github.com/newaetech/chipwhisperer)
+FrodoKEM-640 ([pqm3 - Round 3](https://github.com/mupq/pqm4)) decapsulation traces, captured by using STM32F4 target, [Qiling emulator](https://github.com/qilingframework/qiling) and [ChipWisperer enviorment](https://github.com/newaetech/chipwhisperer)
 
 ---
 
@@ -15,6 +15,7 @@ FrodoKEM-640 decapsulation traces, captured by using STM32F4 target, [Qiling](ht
     - [2.3.2 Parallel](#232-parallel)
     - [2.3.3 Sample](#233-sample)
     - [2.3.4 Truncated](#234-truncated)
+    - [2.3.5 Truncated Empirical](#235-truncated-empirical)
 - [3. Results](#3-results)
   - [3.1 Creating the Leackage Models](#31-creating-the-leackage-models)
   - [3.1 Plots](#32-plots)
@@ -110,7 +111,8 @@ The firmware is built using the FrodoKEM API from the `pqm4` repository. The ins
 | `frodo_collect_traces_sequential.py` | Collects traces one at a time, for each fault index sequentially |
 | `frodo_collect_traces_parallel.py` | Collects traces in parallel across N fault indices |
 | `frodo_collect_traces_sample.py` | Collects multiple independent runs across a fixed set of fault indices |
-| `frodo_collect_traces_truncated.py` | Collects subtraces for 80 different ciphertexts |
+| `frodo_collect_traces_truncated.py` | Collects subtraces for different ciphertexts |
+| `frodo_collect_traces_truncated_empirical.py` | Collects subtraces for different ciphertexts and different keys |
 | `[TRACE] FrodoKEM-640.ipynb` | Notebook that collects all the modes and the number of the traces ir the default indices can be changed|
 
 
@@ -168,7 +170,18 @@ JOBS_TRUNCATED            = 10
 OUTPUT_DIR_TRUNCATED      = output_decapsulation_truncated
 OUTPUT_DIR_TRUNCATED_TRIM = output_decapsulation_truncated_TRIM
 ```
-**Notebook - [TRACE] FrodoKEM-640.ipynb** - everything can be changed from the notebook and it is easier o run and see the live results instead of the terminal
+
+**Truncated Empirical mode** — runs `NUM_RUNS` independent experiments, each over random ciphertexts, using `JOBS_SAMPLE` workers:
+
+```makefile
+NUM_RUNS_TRUNCATED_EMPIRICAL        = 4
+NUM_RANDOM_CIPHERTEXTS_TRUNCATED_EMPIRICAL = 80
+FAULT_INDICES_TRUNCATED_EMPIRICAL   = $(shell $(PYTHON) -c "print(' '.join(str(i) for i in range(0, 321, 2)))")
+JOBS_TRUNCATED_EMPIRICAL            = 10
+OUTPUT_DIR_TRUNCATED_EMPIRICAL      = output_decapsulation_empirical
+OUTPUT_DIR_TRUNCATED_EMPIRICAL_TRIM = output_decapsulation_empirical_TRIM
+```
+**Notebook - [TRACE] FrodoKEM-640.ipynb** - everything can be changed from the notebook and it is easier to run and see the live results instead of the terminal
 > Each fault index controls how many columns of the C_1 component of the FrodoKEM ciphertext are zeroed out before decapsulation.
 
 > **Warning:** The number of traces, the number of jobs, the fault indicies or the outputfiles should all be changed in the Makefile. 
@@ -188,6 +201,9 @@ OUTPUT_DIR_TRUNCATED_TRIM = output_decapsulation_truncated_TRIM
 | `make snapshot_truncated` | Runs keygen, saves snapshot for truncated mode and generates one valid ciphertext per run |
 | `make decap_truncated` | Runs all truncated traces (requires snapshot) and also the decapsulation for the valid ciphertext|
 | `make all_truncated` | Runs `snapshot_sample` then `decap_sample` |
+| `make snapshot_truncated_empirical` | Runs more keygen, saves snapshot for truncated mode and generates for each key, more ciphertexts|
+| `make decap_truncated_empirical` | Runs all truncated traces (requires snapshot and ciphertexts) and also the decapsulation for the valid ciphertext|
+| `make all_truncated_empirical` | Runs `snapshot_sample` then `decap_sample` |
 | `make all` | Runs `all_sequential` `all_parallel` `all_sample` |
 | `make clean_sequential` | Deletes sequential output directories |
 | `make clean_parallel` | Deletes parallel output directories |
@@ -260,8 +276,8 @@ Similar to the parallel version, but traces are collected for a set of fault ind
 output_decapsulation_sample/
 |-- B/ #folder for all B' extracted/created from ciphertext
     |-- B_<i> / B_valid_<i> # value of B' / B'_valid where i is the index of the fault index
-    |--B_from_register_<i> / B_valid_from_registers # value of B'/B'_valid extracted from the smlad instruction for fault index i 
-    |--B_from_registers_packed_<i> / B_valid_from_registers_packed # value of B'/B'_valid packed extracted from the registers where one values has 32bits and it encodes 2 values of 16 bits, e.g b_0_packed= b_1 || b_0
+    |--B_from_register_<i>_<j> / B_valid_from_registers # value of B'/B'_valid extracted from the smlad instruction for fault index i, j is the index fault  
+    |--B_from_registers_packed_<i>_<j> / B_valid_from_registers_packed # value of B'/B'_valid packed extracted from the registers where one values has 32bits and it encodes 2 values of 16 bits, e.g b_0_packed= b_1 || b_0
 |-- S / # folder for saving S
     |-- S_<i> # S extracted from smlad instruction where i is the index of the ciphertext
     |-- S_valid_<i> # S extracted from smald insstructions for the valid cipherext
@@ -291,11 +307,13 @@ This mode aims to capture every dot product. In FrodoKEM's decapsulation, the ma
 output_decapsulation_truncated/
 output_decapsulation_sample/
 |-- B/ #folder for all B' extracted/created from ciphertext
-    |-- B_<i> / B_valid_<i> # value of B' / B'_valid where i is the index of the fault index
-    |--B_from_register_<i> / B_valid_from_registers # value of B'/B'_valid extracted from the smlad instruction for fault index i 
-    |--B_from_registers_packed_<i> / B_valid_from_registers_packed # value of B'/B'_valid packed extracted from the registers where one values has 32bits and it encodes 2 values of 16 bits, e.g b_0_packed= b_1 || b_0
+    |--B_base_<i> / B_valid_<i> # value of B' / B'_valid where i is the index of the run
+    |--B_from_register_<i>_<j> / B_valid_from_registers # value of B'/B'_valid extracted from the smlad instruction for fault index i, j is the index fault  
+    |--B_from_registers_packed_<i>_<j> / B_valid_from_registers_packed # value of B'/B'_valid packed extracted from the registers where one values has 32bits and it encodes 2 values of 16 bits, e.g b_0_packed= b_1 || b_0, j is the index fault  
+    |--B_<i>_<j> # B' where i is the run index and j is the fault indices .
+    |--B_from_register_<i>_<j> # B' for run i and fault index j 
 |-- S / # folder for saving S
-    |-- S_<i> # S extracted from smlad instruction where i is the index of the ciphertext
+    |-- S_<i>_<j>. # S extracted from smlad instruction where i is the running index and j is the fault index. j does not change the value of S 
     |-- S_valid_<i> # S extracted from smald insstructions for the valid cipherext
     |-- S.csv # S extracted from sk
 |-- ct_base_<i> # Base ciphertext used for fault injections where i is the run index
@@ -309,6 +327,34 @@ output_decapsulation_sample/
 |-- trace_valid_<i>_<k> # trace for valid ciphertext for run i, targeting the l xs() dot product 
 ```
 A trimmed version of each trace is saved to `output_decapsulation_truncated_TRIM/`.
+ 
+---
+#### 2.3.5 Truncated Empirical
+ 
+This mode does exaclty the same as `Truncate mode`, but it creates different keys and it runs more valid ciphertexts and modified ciphertexts per key.  
+```
+output_decapsulation_truncated/
+output_decapsulation_sample/
+|-- B/ #folder for all B' extracted/created from ciphertext
+    |--B_base_<i>_random<k>/ B_valid_<i>_random<k> # value of B' / B'_valid where i is the index of the run, and k is the index of the unique ciphertext for the run that used the keys at index i 
+    |--B_from_register_<i>_<j> / B_valid_from_registers # value of B'/B'_valid extracted from the smlad instruction for fault index i 
+    |--B_from_registers_packed_<i> / B_valid_from_registers_packed # value of B'/B'_valid packed extracted from the registers where one values has 32bits and it encodes 2 values of 16 bits, e.g b_0_packed= b_1 || b_0
+    |--B_<i>_<j>_random<k> # B' where i is the run index and j is the fault indices, k is the randomly generated ciphertext with the keys at index i 
+    |--B_from_register_<i>_<j>_<k> # B' for run i and fault index j, k is the randomly generated ciphertext with the keys at index i
+|-- S / # folder for saving S
+    |-- S_<i>_<j>_random<k> # S extracted from smlad instruction where i is the running index and j is the fault index. j does not change the value of S, k should not change the value 
+    |-- S_valid_<i>_random<k> # S extracted from smald insstructions for the valid cipherext,  k should not change the value 
+|-- ct_base_<i>_random<k> # Base ciphertext used for fault injections where i is the run index
+|-- ct_modified_<i>_<j>_random<k> .bin # Modified ciphertext where i represents the run index and j represent the fault index, k is the index of the unique ciphertext for the run that used the keys at index i 
+|-- ct_valid_<i>_random<k> # Valid ciphertext for run i, k is the index of the unique ciphertext for the run that used the keys at index i 
+|-- pk_<i>.bin # Public key for run i
+|-- sk_<i>.bin # Secret key for run i 
+|-- keygen_snapshot_log.txt # Instruction log from key generation up to the multiplication
+|-- snapshot_<i>.pkl # snapshotwith keygen until multiplication that is saved on the disk where i is the index of the pairs 
+|-- trace_<i>_<k>_<j>_random<l>  # trace for cipheretxt at run i with, targeting the k xs() dot products for ciphertext with fault index j, l is the index of the unique ciphertext for the run that used the keys at index i 
+|-- trace_valid_<i>_<k>_random<k>  # trace for valid ciphertext for run i, targeting the k xs() dot product, l is the index of the unique ciphertext for the run that used the keys at index i 
+```
+A trimmed version of each trace is saved to `output_decapsulation_truncated_empirical_TRIM/`.
  
 ---
  
@@ -330,6 +376,7 @@ The output files are
 | `Results_decapsulation_sample/HD_trace_<j>.npy` | HD traces grouped by fault index `j` (sample mode) |
 | `Results_decapsulation_truncated/HW_SUBTRACE_xs<j>.npy` | HW traces grouped by dot product index `j` (truncated mode) |
 | `Results_decapsulation_truncated/HD_SUBTRACE_xs<j>.npy` | HD traces grouped by dot product index `j` (truncated mode) |
+| `Results_decapsulation_truncated_S\` | plots for 3 types of attacks with one S or multiple S collected from the `truncated version` or `empirical version`|
 
 ---
 
@@ -349,8 +396,18 @@ All plots are saved to the relevant results directory (e.g. `Results_decapsulati
 | `snr_HW_combined.png` | All HW SNR for multiple indices |
 | `snr_HD_combined.png` | All HD SNR for multiple indices  |
 | `trace_with_arithmetic.png` | HW and HD with points when an arithmetic operation is hit |
+| `S_heatmaps_{run_index}.png` | Heatmaps of multiple S |
+| `heatmap_valid_per_S_Run_{run_index}.png` | The rank heatmaps for valid ciphertext for more S |
+| `heatmap_modified_for_S_{run_index}.png` | The rank heatmaps for modified ciphertext for more S |
+| `S_success_rates.png` | The succes rate for guessing S |
+| `heatmap_rank_altered_ciphertext.png` | The rank heatmaps for an altered attack without context check|
+| `heatmap_rank_valid_ciphertext.png` | The rank heatmaps for a valid attack without trashold |
+| `heatmap_valid_progressive_retry.png"` | The rank heatmaps for a valid attack with trashold |
+| `heatmap_rank_combine.png` | The rank heatmaps for a combined attack with no HW |
+| `heatmap_rank_combine_same_hw.png` | The rank heatmaps for a combined attack with HW |
 
-**Modes** - there are 4 modes for analysis: sequantial, parallel, sample, truncated and each of them have their dedicated notebook
+
+**Modes** - there are 4 modes for analysis: sequantial, parallel, sample, truncated, truncated empirical (valid vs altered notebook) and each of them have their dedicated notebook
 
 
 | Notebook name | What it shows |
@@ -360,11 +417,14 @@ All plots are saved to the relevant results directory (e.g. `Results_decapsulati
 | `[ANALYSIS] sample_analysis.ipynb` | Plots the HW, HD comparison between sample traces |
 | `[ANALYSIS] sequential_analysis.ipynb` | Plots the HW, HD comparison between sequantial traces |
 | `[ANALYSIS] truncated_analysis.ipynb` | Plots the HW, HD comparison between parallel traces and computes correlation between the traces and the value |
+| `[ANALYSIS] valid_vs_altered.ipynb` | Guesses S an computes the heatmaps based on more attacks |
 
-**[ANALYSIS] truncated_analysis.ipynb** - Creates correlation between the target value and the actual value for the columns of B' and for S. Based on the correlation, it takes S from an interval and based on the value of S it receives a rank by comparing it with the actual S. 
+**[ANALYSIS] truncated_analysis.ipynb** - Creates correlation between the target value and the actual value for the columns of B' and for S. Based on the correlation, it takes S from an interval.
 
 E.g if the correlation for value=3 is 1, S-guessed=3. If actual value of S=3, then rank=1. 
 
 E.g if the correlation for value=2 is 1 and the correlation for value =3 is 0.8 and there is no other value with a correlation bigger than value=3, S_guessed=2. If actual value of S=3, then rank=2. 
+
+**[ANALYSIS] valid_vs_altered.ipynb** - based on the correlation it guesses S and it computes the difference between multiple attacks
 
 
