@@ -376,7 +376,6 @@ The output files are
 | `Results_decapsulation_sample/HD_trace_<j>.npy` | HD traces grouped by fault index `j` (sample mode) |
 | `Results_decapsulation_truncated/HW_SUBTRACE_xs<j>.npy` | HW traces grouped by dot product index `j` (truncated mode) |
 | `Results_decapsulation_truncated/HD_SUBTRACE_xs<j>.npy` | HD traces grouped by dot product index `j` (truncated mode) |
-| `Results_decapsulation_truncated_S\` | plots for 3 types of attacks with one S or multiple S collected from the `truncated version` or `empirical version`|
 
 ---
 
