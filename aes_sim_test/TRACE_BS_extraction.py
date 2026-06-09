@@ -27,6 +27,11 @@ from TRACE_path_helpers import (
 from TRACE_stop_tracing import StopEmulation
 
 
+def get_truncated_valid_trim_csv_path(output_dir_trim, run_index, xs_id, random_index=None):
+    random_suffix = "" if random_index is None else f"_random{random_index}"
+    return os.path.join(output_dir_trim, f"trace_valid_{run_index}_{xs_id}{random_suffix}.csv")
+
+
 def save_S_from_sk_csv(sk, S_path):
     """ extract S from sk and turn it into a csv """
     before_S = s_length + SEED_A_length + b_length
@@ -125,12 +130,12 @@ def extract_smlad_operands(trace_csv_path):
     )
 
 
-def extract_B_from_registers_matrix_from_trace(output_dir_trim, run_index, xs_id, valid=False, fault_index=None):
+def extract_B_from_registers_matrix_from_trace(output_dir_trim, run_index, xs_id, valid=False, fault_index=None, random_index=None):
     """Check the length and return B packed and unpacked as matrices of shape (PARAMS_NBAR, PARAMS_N//2) and (PARAMS_NBAR, PARAMS_N)"""
     trace_path = (
-        os.path.join(output_dir_trim, f"trace_valid_{run_index}_{xs_id}.csv")
+        get_truncated_valid_trim_csv_path(output_dir_trim, run_index, xs_id, random_index=random_index)
         if valid
-        else get_truncated_trim_csv_path(output_dir_trim, run_index, xs_id, fault_index)
+        else get_truncated_trim_csv_path(output_dir_trim, run_index, xs_id, fault_index, random_index=random_index)
     )
 
     B_packed, B_from_registers, S_from_registers = extract_smlad_operands(trace_path)
@@ -158,12 +163,12 @@ def extract_B_from_registers_matrix_from_trace(output_dir_trim, run_index, xs_id
     )
 
 
-def save_and_check_B_from_registers_from_traces(output_dir, output_dir_trim, run_index, valid=False, fault_index=None):
+def save_and_check_B_from_registers_from_traces(output_dir, output_dir_trim, run_index, valid=False, fault_index=None, random_index=None):
     """ Compare if B extracted from registers matches the B from ciphertext and is consistent across all xs traces"""
     B_csv_path = (
-        get_B_valid_csv_path(output_dir, run_index)
+        get_B_valid_csv_path(output_dir, run_index, random_index=random_index)
         if valid
-        else get_B_csv_path(output_dir, run_index, fault_index)
+        else get_B_csv_path(output_dir, run_index, fault_index, random_index=random_index)
     )
 
     if not os.path.exists(B_csv_path):
@@ -180,9 +185,9 @@ def save_and_check_B_from_registers_from_traces(output_dir, output_dir_trim, run
 
     for xs_id in range(PARAMS_NBAR):
         trace_path = (
-            os.path.join(output_dir_trim, f"trace_valid_{run_index}_{xs_id}.csv")
+            get_truncated_valid_trim_csv_path(output_dir_trim, run_index, xs_id, random_index=random_index)
             if valid
-            else get_truncated_trim_csv_path(output_dir_trim, run_index, xs_id, fault_index)
+            else get_truncated_trim_csv_path(output_dir_trim, run_index, xs_id, fault_index, random_index=random_index)
         )
 
         if not os.path.exists(trace_path):
@@ -195,6 +200,7 @@ def save_and_check_B_from_registers_from_traces(output_dir, output_dir_trim, run
             xs_id,
             valid=valid,
             fault_index=fault_index,
+            random_index=random_index,
         )
 
         if B_packed_matrix is None or B_matrix is None:
@@ -243,9 +249,9 @@ def save_and_check_B_from_registers_from_traces(output_dir, output_dir_trim, run
     os.makedirs(get_B_dir(output_dir), exist_ok=True)
 
     B_output_path = (
-        get_B_valid_from_registers_csv_path(output_dir, run_index)
+        get_B_valid_from_registers_csv_path(output_dir, run_index, random_index=random_index)
         if valid
-        else get_B_from_registers_csv_path(output_dir, run_index, fault_index)
+        else get_B_from_registers_csv_path(output_dir, run_index, fault_index, random_index=random_index)
     )
     B_from_registers_df = pd.DataFrame(
         reference_B,
@@ -255,9 +261,9 @@ def save_and_check_B_from_registers_from_traces(output_dir, output_dir_trim, run
     B_from_registers_df.to_csv(B_output_path, index=False)
 
     B_packed_output_path = (
-        get_B_valid_packed_from_registers_csv_path(output_dir, run_index)
+        get_B_valid_packed_from_registers_csv_path(output_dir, run_index, random_index=random_index)
         if valid
-        else get_B_packed_from_registers_csv_path(output_dir, run_index, fault_index)
+        else get_B_packed_from_registers_csv_path(output_dir, run_index, fault_index, random_index=random_index)
     )
     B_packed_from_registers_df = pd.DataFrame(
         reference_B_packed,
@@ -274,7 +280,7 @@ def save_and_check_B_from_registers_from_traces(output_dir, output_dir_trim, run
     )
 
 
-def save_and_check_S_from_traces(output_dir, output_dir_trim, run_index, fault_index=None, valid=False):
+def save_and_check_S_from_traces(output_dir, output_dir_trim, run_index, fault_index=None, valid=False, random_index=None):
     """ Compare if S extracted from registers matches the S from sk and is consistent across all xs traces"""
     sk_path = (
         os.path.join(output_dir, f"sk_{run_index}.bin")
@@ -293,9 +299,9 @@ def save_and_check_S_from_traces(output_dir, output_dir_trim, run_index, fault_i
 
     for xs_id in range(PARAMS_NBAR):
         trace_path = (
-            os.path.join(output_dir_trim, f"trace_valid_{run_index}_{xs_id}.csv")
+            get_truncated_valid_trim_csv_path(output_dir_trim, run_index, xs_id, random_index=random_index)
             if valid
-            else get_truncated_trim_csv_path(output_dir_trim, run_index, xs_id, fault_index)
+            else get_truncated_trim_csv_path(output_dir_trim, run_index, xs_id, fault_index, random_index=random_index)
         )
 
         if not os.path.exists(trace_path):
@@ -351,7 +357,7 @@ def save_and_check_S_from_traces(output_dir, output_dir_trim, run_index, fault_i
     for xs_id, S_vector in S_vectors:
         S_by_xs[xs_id] = S_vector
 
-    S_path = get_S_csv_path(output_dir, run_index, fault_index=fault_index, valid=valid)
+    S_path = get_S_csv_path(output_dir, run_index, fault_index=fault_index, valid=valid, random_index=random_index)
     os.makedirs(os.path.dirname(S_path), exist_ok=True)
     S_matrix = S_by_xs.T
     S_df = pd.DataFrame(S_matrix, columns=[f"S_col_{i}" for i in range(PARAMS_NBAR)])

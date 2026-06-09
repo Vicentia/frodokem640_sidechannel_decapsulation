@@ -47,11 +47,18 @@ from TRACE_emulator_helpers import (
 from TRACE_stop_tracing import SnapshotReady, StopEmulation, hard_stop
 
 
+def is_truncated_worker_mode(mode):
+    return mode in {"truncated", "truncated_empirical"}
+
+
 def handle_randombytes_call(ql, namespace, address):
     """
     The firmware randombytes are replaced with a hook that generates randombytes 
     - use_host_randombytes set to True = we want to replace the firmware randombytes with Python os.urandom
     - host_randombytes_enabled set to True = the hook is active and will replace randombytes calls 
+
+    - it it used in truncated version to generate more valid ciphertexts 
+    - it is used in emphirical version to generate more S and more valid ciphertexts 
     """
     randombytes_addr = namespace.get("randombytes_addr")
     if randombytes_addr is None or address != randombytes_addr:
@@ -251,7 +258,7 @@ def save_keys_from_qiling(
 def make_snapshot_tracing(ql, address, size, namespace):
     """
     Trace from the beginning until the entry of crypto_kem_dec.
-    When encapsulation happens, save the ct 
+    After encapsulation, save ct_valid 
     """
     if namespace.get("stop_requested"):
         return
@@ -298,15 +305,47 @@ def make_snapshot_tracing(ql, address, size, namespace):
     crypto_kem_enc_addr = namespace.get("crypto_kem_enc_addr")
     if crypto_kem_enc_addr and address == crypto_kem_enc_addr and not namespace.get("hit_crypto_kem_enc"):
         namespace["hit_crypto_kem_enc"] = True
-        namespace["host_randombytes_enabled"] = True
+        # This is for generating random valid ciphertexts
+        namespace["host_randombytes_enabled"] = namespace.get("host_randombytes_for_encapsulation", True)
         print(
             f"crypto_kem_enc() hit during snapshot at {hex(address)}, "
             f"ct ptr = {hex(ql.arch.regs.read('r0'))}"
         )
+        if namespace.get("snapshot_at") == "crypto_kem_enc":
+            print("Saving snapshot at crypto_kem_enc entry, before encapsulation runs.")
+            save_keys_from_qiling(
+                ql,
+                namespace.get("global_output_dir"),
+                namespace.get("g_pk_addr"),
+                namespace.get("g_sk_addr"),
+                namespace.get("g_keypair_done_addr"),
+                namespace.get("key_index"),
+                namespace.get("save_key_s_csv", True),
+            )
+
+            if not namespace.get("snapshot_saved"):
+                snapshot = save_snapshot_manual(ql)
+                print(f"Snapshot dict has {len(snapshot['memory'])} memory regions")
+                print(f"Snapshot regs: {snapshot['regs']}")
+
+                with open(namespace["snapshot_path"], "wb") as f:
+                    pickle.dump(snapshot, f)
+
+                namespace["snapshot_saved"] = True
+                print(
+                    f"Snapshot saved successfully, file size: "
+                    f"{os.path.getsize(namespace['snapshot_path'])} bytes"
+                )
+
+            namespace["stop_requested"] = True
+            hard_stop(ql)
+            raise SnapshotReady("Reached crypto_kem_enc — snapshot ready")
 
     kem_keypair_addr = namespace.get("kem_keypair_addr")
     if kem_keypair_addr and address == kem_keypair_addr and not namespace.get("hit_kem_keypair"):
         namespace["hit_kem_keypair"] = True
+        # This is for random keys
+        namespace["host_randombytes_enabled"] = namespace.get("host_randombytes_for_keygen", True)
         namespace["address_PK"] = ql.arch.regs.read("r0")
         namespace["address_SK"] = ql.arch.regs.read("r1")
         print("----------------------------")
@@ -314,6 +353,8 @@ def make_snapshot_tracing(ql, address, size, namespace):
         print("----------------------------")
         print(f"pk ptr = {hex(namespace['address_PK'])}")
         print(f"sk ptr = {hex(namespace['address_SK'])}")
+        if namespace.get("use_host_randombytes"):
+            print("[RANDOM] host randombytes enabled for key generation")
         print("----------------------------")
 
     crypto_kem_dec_addr = namespace.get("crypto_kem_dec_addr")
@@ -514,6 +555,7 @@ def make_full_trace(ql, address, size, namespace):
     kem_keypair_addr = namespace.get("kem_keypair_addr")
     if kem_keypair_addr and address == kem_keypair_addr and not namespace.get("hit_kem_keypair"):
         namespace["hit_kem_keypair"] = True
+        namespace["host_randombytes_enabled"] = True
         namespace["address_PK"] = ql.arch.regs.read("r0")
         namespace["address_SK"] = ql.arch.regs.read("r1")
         print("----------------------------")
@@ -521,6 +563,8 @@ def make_full_trace(ql, address, size, namespace):
         print("----------------------------")
         print(f"pk ptr = {hex(namespace['address_PK'])}")
         print(f"sk ptr = {hex(namespace['address_SK'])}")
+        if namespace.get("use_host_randombytes"):
+            print("[RANDOM] host randombytes enabled for key generation")
         print("----------------------------")
 
     crypto_kem_enc_addr = namespace.get("crypto_kem_enc_addr")
@@ -779,17 +823,19 @@ def save_xs_csvs(namespace, run_index):
     output_dir_trim = namespace["output_dir_trim"]
     is_valid = namespace.get("ciphertext_mode") == "valid"
     fault_index = namespace.get("current_fault_index")
+    random_index = namespace.get("current_random_index")
+    random_suffix = "" if random_index is None else f"_random{random_index}"
 
     for xs_id in range(PARAMS_NBAR):
         full_path = (
-            os.path.join(output_dir, f"trace_valid_{run_index}_{xs_id}.csv")
+            os.path.join(output_dir, f"trace_valid_{run_index}_{xs_id}{random_suffix}.csv")
             if is_valid
-            else get_truncated_trace_csv_path(output_dir, run_index, xs_id, fault_index)
+            else get_truncated_trace_csv_path(output_dir, run_index, xs_id, fault_index, random_index=random_index)
         )
         trim_path = (
-            os.path.join(output_dir_trim, f"trace_valid_{run_index}_{xs_id}.csv")
+            os.path.join(output_dir_trim, f"trace_valid_{run_index}_{xs_id}{random_suffix}.csv")
             if is_valid
-            else get_truncated_trim_csv_path(output_dir_trim, run_index, xs_id, fault_index)
+            else get_truncated_trim_csv_path(output_dir_trim, run_index, xs_id, fault_index, random_index=random_index)
         )
 
         write_trace_csv(full_path, namespace["xs_ins_traces"][xs_id], namespace["xs_reg_traces"][xs_id])
@@ -885,11 +931,7 @@ def make_truncated_decapsulation_tracing(ql, address, size, namespace):
             namespace["active_xs_return_addr"] = None
             return
 
-    if (
-        namespace.get("active_xs")
-        and namespace.get("active_xs_return_addr") is not None
-        and address == namespace.get("active_xs_return_addr")
-    ):
+    if (namespace.get("active_xs") and namespace.get("active_xs_return_addr") is not None and address == namespace.get("active_xs_return_addr")):
         print(f"[XS END] xs_id={namespace.get('active_xs_id')}")
         namespace["active_xs"] = False
         namespace["active_xs_id"] = None
@@ -923,7 +965,7 @@ def make_truncated_decapsulation_tracing(ql, address, size, namespace):
 
 def unpack_decapsulation_worker_args(worker_args, mode):
     """
-    Return the arguments of the worker based on the mode (parallel, sample or truncated)
+    Return worker arguments as a named config based on the selected tracing mode.
     """
     if mode == "parallel":
         ciphertext_mode = "modified"
@@ -1078,11 +1120,56 @@ def unpack_decapsulation_worker_args(worker_args, mode):
             "snapshot_at": snapshot_at,
         }
 
-    if mode == "truncated":
+    if is_truncated_worker_mode(mode):
         ciphertext_mode = "modified"
         snapshot_at = "crypto_kem_dec"
         crypto_kem_dec_addr_local = None
-        if len(worker_args) == 16:
+        random_index_local = None
+        randombytes_addr_local = None
+        use_host_randombytes_local = False
+        if len(worker_args) == 19:
+            (
+                run_index_local,
+                fault_index_local,
+                random_index_local,
+                snapshot_path_local,
+                elf_file,
+                output_dir_local,
+                output_dir_trim_local,
+                trigger_high_addr_local,
+                trigger_low_addr_local,
+                skip_addrs_local,
+                g_ct_addr_local,
+                clear_bytes_addr_local,
+                mul_bs_addr_local,
+                xs_addr_local,
+                crypto_kem_dec_addr_local,
+                randombytes_addr_local,
+                use_host_randombytes_local,
+                ciphertext_mode,
+                snapshot_at,
+            ) = worker_args
+        elif len(worker_args) == 17:
+            (
+                run_index_local,
+                fault_index_local,
+                random_index_local,
+                snapshot_path_local,
+                elf_file,
+                output_dir_local,
+                output_dir_trim_local,
+                trigger_high_addr_local,
+                trigger_low_addr_local,
+                skip_addrs_local,
+                g_ct_addr_local,
+                clear_bytes_addr_local,
+                mul_bs_addr_local,
+                xs_addr_local,
+                crypto_kem_dec_addr_local,
+                ciphertext_mode,
+                snapshot_at,
+            ) = worker_args
+        elif len(worker_args) == 16:
             (
                 run_index_local,
                 fault_index_local,
@@ -1138,6 +1225,7 @@ def unpack_decapsulation_worker_args(worker_args, mode):
         return {
             "run_index": run_index_local,
             "fault_index": fault_index_local,
+            "random_index": random_index_local,
             "snapshot_path": snapshot_path_local,
             "elf_file": elf_file,
             "output_dir": output_dir_local,
@@ -1147,6 +1235,8 @@ def unpack_decapsulation_worker_args(worker_args, mode):
             "skip_addrs": skip_addrs_local,
             "g_ct_addr": g_ct_addr_local,
             "clear_bytes_addr": clear_bytes_addr_local,
+            "randombytes_addr": randombytes_addr_local,
+            "use_host_randombytes": use_host_randombytes_local,
             "crypto_kem_dec_addr": crypto_kem_dec_addr_local,
             "mul_bs_addr": mul_bs_addr_local,
             "xs_addr": xs_addr_local,
@@ -1169,6 +1259,7 @@ def configure_worker_namespace(namespace, config, mode):
     else:
         namespace["current_run_index"] = run_index
         namespace["current_fault_index"] = fault_index
+        namespace["current_random_index"] = config.get("random_index")
 
     namespace["trigger_high_addr"] = config["trigger_high_addr"]
     namespace["trigger_low_addr"] = config["trigger_low_addr"]
@@ -1177,6 +1268,10 @@ def configure_worker_namespace(namespace, config, mode):
     namespace["skip_addrs"] = set(config["skip_addrs"])
     namespace["g_ct_addr"] = config["g_ct_addr"]
     namespace["clear_bytes_addr"] = config["clear_bytes_addr"]
+    namespace["randombytes_addr"] = config.get("randombytes_addr")
+    namespace["use_host_randombytes"] = config.get("use_host_randombytes", namespace.get("use_host_randombytes", False))
+    namespace["host_randombytes_for_keygen"] = config.get("host_randombytes_for_keygen", namespace.get("host_randombytes_for_keygen", True))
+    namespace["host_randombytes_for_encapsulation"] = config.get("host_randombytes_for_encapsulation", namespace.get("host_randombytes_for_encapsulation", True))
     namespace["output_dir"] = config["output_dir"]
     namespace["output_dir_trim"] = config["output_dir_trim"]
     namespace["global_output_dir"] = config["output_dir"]
@@ -1185,11 +1280,15 @@ def configure_worker_namespace(namespace, config, mode):
     namespace["should_prepare_ciphertext_at_dec_entry"] = (
         namespace["snapshot_at"] == "crypto_kem_enc"
     )
+    namespace["host_randombytes_enabled"] = (
+        namespace["should_prepare_ciphertext_at_dec_entry"]
+        and namespace["use_host_randombytes"]
+    )
     namespace["md"] = make_disasm()
     namespace.setdefault("ins_trace", [])
     namespace.setdefault("reg_trace", [])
 
-    if mode == "truncated":
+    if is_truncated_worker_mode(mode):
         namespace["mul_bs_addr"] = config["mul_bs_addr"]
         namespace["xs_addr"] = config["xs_addr"]
 
@@ -1228,6 +1327,7 @@ def prepare_worker_ciphertext(ql, config, mode):
 
     run_index = config["run_index"]
     fault_index = config["fault_index"]
+    random_index = config.get("random_index")
     output_dir = config["output_dir"]
     ct_ptr = ql.arch.regs.read("r1") or config["g_ct_addr"]
     ciphertext_mode = config.get("ciphertext_mode", "modified")
@@ -1239,7 +1339,7 @@ def prepare_worker_ciphertext(ql, config, mode):
         if mode == "parallel":
             base_ct_path = os.path.join(output_dir, "ct_base.bin")
         else:
-            base_ct_path = get_run_ciphertext_path(output_dir, run_index)
+            base_ct_path = get_run_ciphertext_path(output_dir, run_index, random_index=random_index)
 
         base_ct = load_base_ciphertext(base_ct_path, force_generate=True)
         c1_initial, selected_ct = modify_ciphertext_c1_from_base(base_ct, fault_index)
@@ -1306,11 +1406,11 @@ def prepare_worker_ciphertext(ql, config, mode):
         save_B_from_ciphertext_csv(selected_ct, b_path)
         return
 
-    if mode == "truncated":
+    if is_truncated_worker_mode(mode):
         ct_path = (
-            get_ct_valid_path(output_dir, run_index)
+            get_ct_valid_path(output_dir, run_index, random_index=random_index)
             if ciphertext_mode == "valid"
-            else get_sample_ct_modified_path(output_dir, run_index, fault_index)
+            else get_sample_ct_modified_path(output_dir, run_index, fault_index, random_index=random_index)
         )
         with open(ct_path, "wb") as f:
             f.write(selected_ct)
@@ -1324,9 +1424,9 @@ def prepare_worker_ciphertext(ql, config, mode):
                 ct_path,
             )
         b_path = (
-            get_B_valid_csv_path(output_dir, run_index)
+            get_B_valid_csv_path(output_dir, run_index, random_index=random_index)
             if ciphertext_mode == "valid"
-            else get_B_csv_path(output_dir, run_index, fault_index)
+            else get_B_csv_path(output_dir, run_index, fault_index, random_index=random_index)
         )
 
         save_B_from_ciphertext_csv(selected_ct, b_path)
@@ -1338,6 +1438,7 @@ def prepare_worker_ciphertext(ql, config, mode):
 def prepare_ciphertext_at_dec_entry(ql, namespace, mode):
     run_index = namespace.get("current_run_index")
     fault_index = namespace.get("fault_index") if mode == "parallel" else namespace.get("current_fault_index")
+    random_index = namespace.get("current_random_index")
     output_dir = namespace["output_dir"]
     ciphertext_mode = namespace.get("ciphertext_mode", "modified")
     ct_ptr = namespace["address_CT"]
@@ -1346,7 +1447,7 @@ def prepare_ciphertext_at_dec_entry(ql, namespace, mode):
         if mode == "parallel":
             base_ct_path = os.path.join(output_dir, "ct_base.bin")
         else:
-            base_ct_path = get_run_ciphertext_path(output_dir, run_index)
+            base_ct_path = get_run_ciphertext_path(output_dir, run_index, random_index=random_index)
 
         base_ct = load_base_ciphertext(base_ct_path)
         c1_initial, selected_ct = modify_ciphertext_c1_from_base(base_ct, fault_index)
@@ -1361,10 +1462,10 @@ def prepare_ciphertext_at_dec_entry(ql, namespace, mode):
             ct_path = get_sample_ct_modified_path(output_dir, run_index, fault_index)
             b_path = os.path.join(output_dir, "B", f"B_{run_index}_{fault_index}.csv")
             label = f"sample modified ciphertext, run_index={run_index}, fault_index={fault_index}"
-        elif mode == "truncated":
-            ct_path = get_sample_ct_modified_path(output_dir, run_index, fault_index)
-            b_path = get_B_csv_path(output_dir, run_index, fault_index)
-            label = f"truncated modified ciphertext, run_index={run_index}, fault_index={fault_index}"
+        elif is_truncated_worker_mode(mode):
+            ct_path = get_sample_ct_modified_path(output_dir, run_index, fault_index, random_index=random_index)
+            b_path = get_B_csv_path(output_dir, run_index, fault_index, random_index=random_index)
+            label = f"{mode} modified ciphertext, run_index={run_index}, fault_index={fault_index}"
         else:
             raise ValueError(f"Unknown decapsulation worker mode: {mode}")
     elif ciphertext_mode == "valid":
@@ -1379,10 +1480,10 @@ def prepare_ciphertext_at_dec_entry(ql, namespace, mode):
             ct_path = get_sample_ct_valid_path(output_dir, run_index)
             b_path = get_B_valid_csv_path(output_dir, run_index)
             label = f"sample valid ciphertext, run_index={run_index}"
-        elif mode == "truncated":
-            ct_path = get_ct_valid_path(output_dir, run_index)
-            b_path = get_B_valid_csv_path(output_dir, run_index)
-            label = f"truncated valid ciphertext, run_index={run_index}"
+        elif is_truncated_worker_mode(mode):
+            ct_path = get_ct_valid_path(output_dir, run_index, random_index=random_index)
+            b_path = get_B_valid_csv_path(output_dir, run_index, random_index=random_index)
+            label = f"{mode} valid ciphertext, run_index={run_index}, random_index={random_index}"
         else:
             raise ValueError(f"Unknown decapsulation worker mode: {mode}")
     else:
@@ -1405,8 +1506,9 @@ def prepare_ciphertext_at_dec_entry(ql, namespace, mode):
 def hook_worker_tracing(ql, namespace, mode):
     """
     Hook the appropriate tracing function based on the worker mode (parallel, sample or truncated)
+    - truncated captures each dot products while the other capture the entire multiplication
     """
-    if mode == "truncated":
+    if is_truncated_worker_mode(mode):
         ql.hook_code(partial(make_truncated_decapsulation_tracing, namespace=namespace))
     elif mode in {"parallel", "sample"}:
         ql.hook_code(partial(make_full_decapsulation_tracing, namespace=namespace, mode=mode))
@@ -1437,7 +1539,7 @@ def print_worker_start(config, namespace, mode):
             f"Backup return address = {hex(backup) if backup is not None else None}"
         )
         print(f"Running decapsulation for Run_{run_index + 1}, fault index {fault_index}...")
-    elif mode == "truncated":
+    elif is_truncated_worker_mode(mode):
         backup = namespace.get("dec_return_addr")
         print(
             f"[WORKER run={run_index + 1} fault={fault_index}] "
@@ -1463,7 +1565,7 @@ def print_worker_summary(config, namespace, mode):
         print(f"\nSummary for fault index {fault_index}:")
     elif mode == "sample":
         print(f"\nSummary for Run_{run_index + 1}, fault index {fault_index}:")
-    elif mode == "truncated":
+    elif is_truncated_worker_mode(mode):
         print(f"\nSummary for run {run_index}, fault index {fault_index}:")
 
     print(f"  trigger_high hit = {namespace.get('hit_trigger_high')}")
@@ -1476,6 +1578,7 @@ def expected_worker_outputs(config, mode):
     ciphertext_mode = config.get("ciphertext_mode", "modified")
     fault_index = config["fault_index"]
     run_index = config["run_index"]
+    random_index = config.get("random_index")
 
     if mode == "parallel":
         if ciphertext_mode == "valid":
@@ -1507,19 +1610,20 @@ def expected_worker_outputs(config, mode):
             get_sample_trim_csv_path(output_dir_trim, run_index, fault_index),
         ]
 
-    if mode == "truncated":
+    if is_truncated_worker_mode(mode):
         if ciphertext_mode == "valid":
+            random_suffix = "" if random_index is None else f"_random{random_index}"
             return [
-                get_ct_valid_path(output_dir, run_index),
-                get_B_valid_csv_path(output_dir, run_index),
-                os.path.join(output_dir, f"trace_valid_{run_index}_0.csv"),
-                os.path.join(output_dir_trim, f"trace_valid_{run_index}_0.csv"),
+                get_ct_valid_path(output_dir, run_index, random_index=random_index),
+                get_B_valid_csv_path(output_dir, run_index, random_index=random_index),
+                os.path.join(output_dir, f"trace_valid_{run_index}_0{random_suffix}.csv"),
+                os.path.join(output_dir_trim, f"trace_valid_{run_index}_0{random_suffix}.csv"),
             ]
         return [
-            get_sample_ct_modified_path(output_dir, run_index, fault_index),
-            get_B_csv_path(output_dir, run_index, fault_index),
-            get_truncated_trace_csv_path(output_dir, run_index, 0, fault_index),
-            get_truncated_trim_csv_path(output_dir_trim, run_index, 0, fault_index),
+            get_sample_ct_modified_path(output_dir, run_index, fault_index, random_index=random_index),
+            get_B_csv_path(output_dir, run_index, fault_index, random_index=random_index),
+            get_truncated_trace_csv_path(output_dir, run_index, 0, fault_index, random_index=random_index),
+            get_truncated_trim_csv_path(output_dir_trim, run_index, 0, fault_index, random_index=random_index),
         ]
 
     return []
@@ -1543,7 +1647,9 @@ def run_decapsulation_worker(worker_args, mode):
     os.makedirs(config["output_dir"], exist_ok=True)
     os.makedirs(config["output_dir_trim"], exist_ok=True)
 
-    reset_trace_state(namespace, include_xs=(mode == "truncated"))
+    reset_trace_state(namespace, include_xs=is_truncated_worker_mode(mode))
+    if namespace.get("should_prepare_ciphertext_at_dec_entry") and namespace.get("use_host_randombytes"):
+        namespace["host_randombytes_enabled"] = True
     ql = load_snapshot_into_worker(namespace, config)
     if not namespace.get("should_prepare_ciphertext_at_dec_entry"):
         namespace["address_CT"] = ql.arch.regs.read("r1")
@@ -1564,13 +1670,14 @@ def run_decapsulation_worker(worker_args, mode):
             print(f"Error during decapsulation (run={run_index + 1} fault={fault_index}): {e}")
         traceback.print_exc()
 
-    if mode == "truncated":
+    if is_truncated_worker_mode(mode):
         save_and_check_B_from_registers_from_traces(
             config["output_dir"],
             config["output_dir_trim"],
             config["run_index"],
             valid=config.get("ciphertext_mode") == "valid",
             fault_index=None if config.get("ciphertext_mode") == "valid" else config["fault_index"],
+            random_index=config.get("random_index"),
         )
         save_and_check_S_from_traces(
             config["output_dir"],
@@ -1578,6 +1685,7 @@ def run_decapsulation_worker(worker_args, mode):
             config["run_index"],
             fault_index=None if config.get("ciphertext_mode") == "valid" else config["fault_index"],
             valid=config.get("ciphertext_mode") == "valid",
+            random_index=config.get("random_index"),
         )
 
     missing_outputs = [

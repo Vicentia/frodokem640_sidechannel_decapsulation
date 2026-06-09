@@ -136,7 +136,7 @@ def main():
     parser.add_argument(
         "--use-host-randombytes",
         action="store_true",
-        help="Hook firmware randombytes() during crypto_kem_enc so valid ciphertexts differ across snapshots",
+        help="Hook firmware randombytes() during key generation and encapsulation so keys and valid ciphertexts differ across snapshots",
     )
     args = parser.parse_args()
 

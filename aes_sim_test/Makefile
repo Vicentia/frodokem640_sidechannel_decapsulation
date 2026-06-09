@@ -3,14 +3,15 @@ SCRIPT_SEQUENTIAL = frodo_collect_traces_sequential.py
 SCRIPT_PARALLEL   = frodo_collect_traces_parallel.py
 SCRIPT_SAMPLE     = frodo_collect_traces_sample.py
 SCRIPT_TRUNCATED  = frodo_collect_traces_truncated.py
+SCRIPT_TRUNCATED_EMPIRICAL = frodo_collect_traces_truncated_empirical.py
 ELF_FILE          = firmware/simpleserial-frodo-CW308_STM32F4.elf
+HOST_RANDOMBYTES_FLAG = --use-host-randombytes
 
 # Sequential 
 N = 2
 OUTPUT_DIR_SEQUENTIAL      = output_decapsulation_sequential
 OUTPUT_DIR_SEQUENTIAL_TRIM = output_decapsulation_sequential_TRIM
 CIPHERTEXT_MODE_SEQUENTIAL = modified
-CIPHERTEXT_MODE_SEQUENTIAL_VALID = valid
 
 # Parallel 
 N_PARALLEL = 10
@@ -18,25 +19,29 @@ JOBS_PARALLEL = 10
 OUTPUT_DIR_PARALLEL      = output_decapsulation_parallel
 OUTPUT_DIR_PARALLEL_TRIM = output_decapsulation_parallel_TRIM
 CIPHERTEXT_MODE_PARALLEL = modified
-CIPHERTEXT_MODE_PARALLEL_VALID = valid
 
 # Sample 
 NUM_RUNS = 5
-FAULT_INDICES_MAX = 320
 JOBS_SAMPLE = 10
 OUTPUT_DIR_SAMPLE      = output_decapsulation_sample
 OUTPUT_DIR_SAMPLE_TRIM = output_decapsulation_sample_TRIM
 CIPHERTEXT_MODE_SAMPLE = modified
-CIPHERTEXT_MODE_SAMPLE_VALID = valid
 
 # Truncated 
-NUM_RUNS_TRUNCATED        = 80 
+NUM_RUNS_TRUNCATED        = 80
 FAULT_INDICES_TRUNCATED   = $(shell $(PYTHON) -c "print(' '.join(str(i) for i in range(0, 321, 2)))")
 JOBS_TRUNCATED            = 10
 OUTPUT_DIR_TRUNCATED      = output_decapsulation_truncated
 OUTPUT_DIR_TRUNCATED_TRIM = output_decapsulation_truncated_TRIM
 CIPHERTEXT_MODE_TRUNCATED = modified
-CIPHERTEXT_MODE_TRUNCATED_VALID = valid
+
+# Empirical comparison: one folder containing valid and altered traces for more S 
+NUM_RUNS_TRUNCATED_EMPIRICAL        = 4
+NUM_RANDOM_CIPHERTEXTS_TRUNCATED_EMPIRICAL = 80
+FAULT_INDICES_TRUNCATED_EMPIRICAL   = $(shell $(PYTHON) -c "print(' '.join(str(i) for i in range(0, 321, 2)))")
+JOBS_TRUNCATED_EMPIRICAL            = 10
+OUTPUT_DIR_TRUNCATED_EMPIRICAL      = output_decapsulation_empirical
+OUTPUT_DIR_TRUNCATED_EMPIRICAL_TRIM = output_decapsulation_empirical_TRIM
 
 # for derivation of the indexes
 INDICES := $(shell $(PYTHON) -c "print(' '.join(str(i) for i in range($(N))))")
@@ -49,7 +54,8 @@ INDICES := $(shell $(PYTHON) -c "print(' '.join(str(i) for i in range($(N))))")
         snapshot_parallel decap_parallel \
         snapshot_sample decap_sample \
 		snapshot_truncated decap_truncated \
-        clean clean_parallel clean_sample clean_sequential clean_truncated clean_all
+		truncated_empirical \
+        clean clean_parallel clean_sample clean_sequential clean_truncated clean_truncated_empirical
 
 # running sequential
 sequential:
@@ -89,6 +95,7 @@ snapshot_parallel:
 		--n 0 \
 		--output-dir $(OUTPUT_DIR_PARALLEL) \
 		--output-dir-trim $(OUTPUT_DIR_PARALLEL_TRIM) \
+		$(HOST_RANDOMBYTES_FLAG) \
 		> $(OUTPUT_DIR_PARALLEL)/keygen_snapshot_log.txt 2>&1
 	@echo "Snapshot done"
 
@@ -132,6 +139,7 @@ snapshot_sample:
 		--jobs $(JOBS_SAMPLE) \
 		--output-dir $(OUTPUT_DIR_SAMPLE) \
 		--output-dir-trim $(OUTPUT_DIR_SAMPLE_TRIM) \
+		$(HOST_RANDOMBYTES_FLAG) \
 		> $(OUTPUT_DIR_SAMPLE)/keygen_snapshot_log.txt 2>&1
 	@echo "Snapshot done"
 
@@ -171,6 +179,7 @@ snapshot_truncated:
 		--jobs $(JOBS_TRUNCATED) \
 		--output-dir $(OUTPUT_DIR_TRUNCATED) \
 		--output-dir-trim $(OUTPUT_DIR_TRUNCATED_TRIM) \
+		$(HOST_RANDOMBYTES_FLAG) \
 		> $(OUTPUT_DIR_TRUNCATED)/keygen_snapshot_log.txt 2>&1
 	@echo "Snapshot done"
 
@@ -190,15 +199,32 @@ decap_truncated:
 	@echo "All truncated traces collected — see $(OUTPUT_DIR_TRUNCATED) and $(OUTPUT_DIR_TRUNCATED_TRIM)"
 
 truncated:
-	@echo "Truncated run started..."
+	@echo "Truncated run started... $$(date)"
 	@echo "-------------------"
 	@$(MAKE) snapshot_truncated
-	@echo "Snapshot captured, valid decapsulation starts"
+	@echo "Snapshot captured, valid decapsulation starts at $$(date)"
 	@$(MAKE) decap_truncated CIPHERTEXT_MODE_TRUNCATED=valid
-	@echo "Snapshot captured, modified decapsulation starts"
+	@echo "Snapshot captured, modified decapsulation starts at $$(date)"
 	@$(MAKE) decap_truncated CIPHERTEXT_MODE_TRUNCATED=modified
 	@echo "----------------"
-	@echo "Truncated run ended."
+	@echo "Truncated run ended at $$(date)."
+
+
+truncated_empirical:
+	@echo "Truncated empirical run started... $$(date)"
+	@mkdir -p $(OUTPUT_DIR_TRUNCATED_EMPIRICAL) $(OUTPUT_DIR_TRUNCATED_EMPIRICAL_TRIM)
+	@$(PYTHON) $(SCRIPT_TRUNCATED_EMPIRICAL) \
+		--elf-file $(ELF_FILE) \
+		--num-runs $(NUM_RUNS_TRUNCATED_EMPIRICAL) \
+		--num-random-ciphertexts $(NUM_RANDOM_CIPHERTEXTS_TRUNCATED_EMPIRICAL) \
+		--fault-indices $(FAULT_INDICES_TRUNCATED_EMPIRICAL) \
+		--jobs $(JOBS_TRUNCATED_EMPIRICAL) \
+		--output-dir $(OUTPUT_DIR_TRUNCATED_EMPIRICAL) \
+		--output-dir-trim $(OUTPUT_DIR_TRUNCATED_EMPIRICAL_TRIM) \
+		--ciphertext-mode empirical \
+		$(HOST_RANDOMBYTES_FLAG) \
+		> $(OUTPUT_DIR_TRUNCATED_EMPIRICAL)/output_truncated_empirical.txt 2>&1
+	@echo "Truncated empirical run ended — see $(OUTPUT_DIR_TRUNCATED_EMPIRICAL) and $(OUTPUT_DIR_TRUNCATED_EMPIRICAL_TRIM) $$(date)"
 
 
 # Running all
@@ -216,20 +242,26 @@ all:
 	@echo "Starting truncated..."
 	@$(MAKE) truncated
 	@echo "Truncated finished: $$(date)"
+	@echo "Starting truncated empirical..."
+	@$(MAKE) truncated_empirical
+	@echo "Truncated empirical finished: $$(date)"
 	@echo "make all finished: $$(date)"
 
 
 # clean
 clean_sequential:
-	rm -rf $(OUTPUT_DIR_SEQUENTIAL) $(OUTPUT_DIR_SEQUENTIAL_TRIM) $(OUTPUT_DIR_SEQUENTIAL_VALID) $(OUTPUT_DIR_SEQUENTIAL_VALID_TRIM)
+	rm -rf $(OUTPUT_DIR_SEQUENTIAL) $(OUTPUT_DIR_SEQUENTIAL_TRIM)
 
 clean_parallel:
-	rm -rf $(OUTPUT_DIR_PARALLEL) $(OUTPUT_DIR_PARALLEL_TRIM) $(OUTPUT_DIR_PARALLEL_VALID) $(OUTPUT_DIR_PARALLEL_VALID_TRIM)
+	rm -rf $(OUTPUT_DIR_PARALLEL) $(OUTPUT_DIR_PARALLEL_TRIM)
 
 clean_sample:
-	rm -rf $(OUTPUT_DIR_SAMPLE) $(OUTPUT_DIR_SAMPLE_TRIM) $(OUTPUT_DIR_SAMPLE_VALID) $(OUTPUT_DIR_SAMPLE_VALID_TRIM)
+	rm -rf $(OUTPUT_DIR_SAMPLE) $(OUTPUT_DIR_SAMPLE_TRIM)
 
 clean_truncated: 
-	rm -rf $(OUTPUT_DIR_TRUNCATED) $(OUTPUT_DIR_TRUNCATED_TRIM) $(OUTPUT_DIR_TRUNCATED_VALID) $(OUTPUT_DIR_TRUNCATED_VALID_TRIM)
+	rm -rf $(OUTPUT_DIR_TRUNCATED) $(OUTPUT_DIR_TRUNCATED_TRIM)
 
-clean: clean_sequential clean_parallel clean_sample clean_truncated
+clean_truncated_empirical:
+	rm -rf $(OUTPUT_DIR_TRUNCATED_EMPIRICAL) $(OUTPUT_DIR_TRUNCATED_EMPIRICAL_TRIM)
+
+clean: clean_sequential clean_parallel clean_sample clean_truncated clean_truncated_empirical

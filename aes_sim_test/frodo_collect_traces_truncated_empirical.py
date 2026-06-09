@@ -11,13 +11,12 @@ from TRACE_path_helpers import (
     get_S_dir,
     get_run_ciphertext_path,
     get_sample_snapshot_path,
-    get_snapshot_path,
 )
 from TRACE_BS_extraction import (
     save_S_from_sk_csv,
 )
-from TRACE_ciphertext_creation import load_base_ciphertext, save_B_from_ciphertext_csv
 from TRACE_stop_tracing import SnapshotReady, StopEmulation
+from TRACE_ciphertext_creation import load_base_ciphertext, save_B_from_ciphertext_csv
 from TRACE_tracing import make_snapshot_tracing, reset_trace_state, run_decapsulation_worker
 from TRACE_parameters_initialisation import (
     PARAMS_NBAR,
@@ -91,7 +90,7 @@ xs_ins_traces = [[] for _ in range(PARAMS_NBAR)]
 xs_reg_traces = [[] for _ in range(PARAMS_NBAR)]
 
 
-def run_truncated_snapshot_worker(worker_args):
+def run_truncated_empirical_snapshot_worker(worker_args):
     (
         run_index,
         elf_file_local,
@@ -133,14 +132,14 @@ def run_truncated_snapshot_worker(worker_args):
         "mul_bs_addr": mul_bs_addr_local,
         "xs_addr": xs_addr_local,
         "global_output_dir": output_dir_local,
-        "key_index": None,
-        "save_key_s_csv": False,
+        "key_index": run_index,
+        "save_key_s_csv": True,
         "output_dir": output_dir_local,
         "snapshot_path": snapshot_path_local,
-        "snapshot_at": "crypto_kem_dec",
+        "snapshot_at": "crypto_kem_enc",
         "snapshot_mode": "truncated",
         "use_host_randombytes": use_host_randombytes_local,
-        "host_randombytes_for_keygen": False,
+        "host_randombytes_for_keygen": True,
         "host_randombytes_for_encapsulation": True,
         "snapshot_progress_interval": 100_000,
         "current_run_index": run_index,
@@ -151,7 +150,7 @@ def run_truncated_snapshot_worker(worker_args):
     reset_trace_state(namespace, include_main_flags=True, include_xs=True)
 
     print("------------------------------")
-    print(f"Snapshot preparation for run {run_index} — keygen + encapsulation + crypto_kem_dec entry:")
+    print(f"Snapshot preparation for run {run_index} — keygen + crypto_kem_enc entry:")
     print("------------------------------")
 
     ql = setup_qiling_instance(elf_file_local)
@@ -176,25 +175,12 @@ def run_truncated_snapshot_worker(worker_args):
     print(f"crypto_kem_enc hit = {namespace.get('hit_crypto_kem_enc')}")
     print(f"crypto_kem_dec hit = {namespace.get('hit_crypto_kem_dec')}")
 
-    if not namespace.get("hit_crypto_kem_dec"):
-        raise StopEmulation(f"Did not reach crypto_kem_dec for run {run_index}")
+    if not namespace.get("hit_crypto_kem_enc"):
+        raise StopEmulation(f"Did not reach crypto_kem_enc for run {run_index}")
 
     if not os.path.exists(snapshot_path_local):
         raise FileNotFoundError(f"Snapshot file was not created at {snapshot_path_local}")
 
-    base_ct_path = get_run_ciphertext_path(output_dir_local, run_index)
-    base_ct = load_base_ciphertext(base_ct_path, force_generate=True)
-
-    if run_index == 0:
-        sk_path = os.path.join(output_dir_local, "sk.bin")
-        if os.path.exists(sk_path):
-            with open(sk_path, "rb") as f:
-                sk = f.read()
-            save_S_from_sk_csv(sk, os.path.join(get_S_dir(output_dir_local), "S.csv"))
-        else:
-            print(f"[WARNING] Missing {sk_path}, cannot save S/S.csv")
-
-    save_B_from_ciphertext_csv(base_ct, os.path.join(output_dir_local, "B", f"B_base_{run_index}.csv"))
     return snapshot_path_local
 
 
@@ -220,7 +206,14 @@ def main():
         "--num-runs",
         type=int,
         required=True,
-        help="Number of independent runs to collect"
+        help="Number of independent S/key snapshots to collect"
+    )
+
+    parser.add_argument(
+        "--num-random-ciphertexts",
+        type=int,
+        default=10,
+        help="Number of valid ciphertexts to generate per S/key snapshot"
     )
 
     parser.add_argument(
@@ -229,7 +222,7 @@ def main():
         nargs="*",
         required=False,
         default=[],
-        help="Fault indices to use per run. For truncated xs traces, use only 0."
+        help="Fault indices for altered traces; valid traces are collected once per random ciphertext"
     )
 
     parser.add_argument(
@@ -257,10 +250,15 @@ def main():
         help="Skip snapshot creation and load existing snapshot from disk"
     )
     parser.add_argument(
+        "--snapshot-only",
+        action="store_true",
+        help="Create snapshots and stop before empirical valid/altered trace workers"
+    )
+    parser.add_argument(
         "--ciphertext-mode",
-        choices=["valid", "modified"],
-        default="modified",
-        help="Use the firmware-generated ciphertext unchanged, or modify C1 before tracing"
+        choices=["empirical"],
+        default="empirical",
+        help="Empirical mode collects valid and altered traces under the same per-run key"
     )
     parser.add_argument(
         "--use-host-randombytes",
@@ -270,23 +268,28 @@ def main():
 
     args = parser.parse_args()
 
-    elf_file      = args.elf_file
-    num_runs      = args.num_runs
-    fault_indices = args.fault_indices
+    elf_file               = args.elf_file
+    num_runs               = args.num_runs
+    num_random_ciphertexts = args.num_random_ciphertexts
 
     output_dir      = args.output_dir
     output_dir_trim = args.output_dir_trim
 
-    total_tasks = num_runs * len(fault_indices)
+    total_valid_tasks = num_runs * num_random_ciphertexts
+    total_modified_tasks = num_runs * num_random_ciphertexts * len(args.fault_indices)
+    total_tasks = total_valid_tasks + total_modified_tasks
     jobs        = args.jobs or max(total_tasks, num_runs, 1)
-    use_host_randombytes = args.use_host_randombytes
+    use_host_randombytes = True
+    if not args.use_host_randombytes:
+        print(
+            "[INFO] empirical mode forces host randombytes so each "
+            "random ciphertext worker runs encapsulation with fresh randomness."
+        )
 
     global_output_dir = output_dir
 
     os.makedirs(output_dir, exist_ok=True)
     os.makedirs(output_dir_trim, exist_ok=True)
-
-    snapshot_path = get_snapshot_path(output_dir)
 
     print("--------------------------------")
     print("Solving symbol addresses from ELF:")
@@ -335,14 +338,16 @@ def main():
             print("Run without --skip-snapshot first.")
             sys.exit(1)
 
-        print(f"[SKIP SNAPSHOT] Loading existing per-run snapshots from {output_dir}")
-        sk_path = os.path.join(output_dir, "sk.bin")
-        if os.path.exists(sk_path):
+        print(f"[SKIP SNAPSHOT] Loading existing empirical per-run snapshots from {output_dir}")
+        for run_index in range(num_runs):
+            sk_path = os.path.join(output_dir, f"sk_{run_index}.bin")
+            if not os.path.exists(sk_path):
+                print(f"[ERROR] Missing {sk_path}, cannot refresh S/S_{run_index}.csv")
+                continue
+
             with open(sk_path, "rb") as f:
                 sk = f.read()
-            save_S_from_sk_csv(sk, os.path.join(get_S_dir(output_dir), "S.csv"))
-        else:
-            print(f"[ERROR] Missing sk.bin, cannot refresh S/S.csv: {sk_path}")
+            save_S_from_sk_csv(sk, os.path.join(get_S_dir(output_dir), f"S_{run_index}.csv"))
 
     else:
         print("------------------------------")
@@ -377,23 +382,29 @@ def main():
         ctx = multiprocessing.get_context("spawn")
         try:
             with ctx.Pool(processes=jobs) as pool:
-                pool.map(run_truncated_snapshot_worker, snapshot_worker_args)
+                pool.map(run_truncated_empirical_snapshot_worker, snapshot_worker_args)
         except Exception:
             print("Error during parallel snapshot creation:")
             traceback.print_exc()
             sys.exit(1)
 
+    if args.snapshot_only:
+        print("[SNAPSHOT ONLY] Valid-per-S snapshots created; skipping trace workers.")
+        return
+
     print("-------------------------------")
-    print(f"Starting {num_runs} runs with {len(fault_indices)} fault indices = {total_tasks} tasks")
-    print(f"Fault indices per run: {fault_indices}")
+    print(
+        f"Starting empirical valid phase: {num_runs} runs x "
+        f"{num_random_ciphertexts} valid ciphertexts = {total_valid_tasks} tasks"
+    )
     print(f"Parallel workers: {jobs}")
     print("-------------------------------")
 
-    worker_fault_indices = [0] if args.ciphertext_mode == "valid" else fault_indices
-    worker_args = [
+    valid_worker_args = [
         (
             run_index,
-            fault_index,
+            0,
+            random_index,
             get_sample_snapshot_path(output_dir, run_index),
             elf_file,
             output_dir,
@@ -406,17 +417,72 @@ def main():
             mul_bs_addr,
             xs_addr,
             crypto_kem_dec_addr,
-            args.ciphertext_mode,
-            "crypto_kem_dec",
+            randombytes_addr,
+            use_host_randombytes,
+            "valid",
+            "crypto_kem_enc",
         )
         for run_index in range(num_runs)
-        for fault_index in worker_fault_indices
+        for random_index in range(num_random_ciphertexts)
     ]
 
     ctx = multiprocessing.get_context("spawn")
 
     with ctx.Pool(processes=jobs) as pool:
-        pool.starmap(run_decapsulation_worker, [(args, "truncated") for args in worker_args])
+        pool.starmap(run_decapsulation_worker, [(worker_args, "truncated_empirical") for worker_args in valid_worker_args])
+
+    print("-------------------------------")
+    print("Preparing independent random base ciphertexts for altered traces")
+    print("-------------------------------")
+
+    for run_index in range(num_runs):
+        for random_index in range(num_random_ciphertexts):
+            base_ct_path = get_run_ciphertext_path(output_dir, run_index, random_index=random_index)
+            base_ct = load_base_ciphertext(base_ct_path, force_generate=not args.skip_snapshot)
+            save_B_from_ciphertext_csv(
+                base_ct,
+                os.path.join(output_dir, "B", f"B_base_{run_index}_random{random_index}.csv"),
+            )
+
+    print("-------------------------------")
+    print(
+        f"Starting empirical altered phase: {num_runs} runs x "
+        f"{num_random_ciphertexts} base ciphertexts x {len(args.fault_indices)} fault indices "
+        f"= {total_modified_tasks} tasks"
+    )
+    print(f"Fault indices per random ciphertext: {args.fault_indices}")
+    print(f"Parallel workers: {jobs}")
+    print("-------------------------------")
+
+    modified_worker_args = [
+        (
+            run_index,
+            fault_index,
+            random_index,
+            get_sample_snapshot_path(output_dir, run_index),
+            elf_file,
+            output_dir,
+            output_dir_trim,
+            trigger_high_addr,
+            trigger_low_addr,
+            tuple(skip_addrs),
+            g_ct_addr,
+            clear_bytes_addr,
+            mul_bs_addr,
+            xs_addr,
+            crypto_kem_dec_addr,
+            randombytes_addr,
+            False,
+            "modified",
+            "crypto_kem_enc",
+        )
+        for run_index in range(num_runs)
+        for random_index in range(num_random_ciphertexts)
+        for fault_index in args.fault_indices
+    ]
+
+    with ctx.Pool(processes=jobs) as pool:
+        pool.starmap(run_decapsulation_worker, [(worker_args, "truncated_empirical") for worker_args in modified_worker_args])
 
     print("\nAll traces have been collected successfully")
 
