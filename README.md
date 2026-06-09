@@ -192,18 +192,18 @@ OUTPUT_DIR_TRUNCATED_EMPIRICAL_TRIM = output_decapsulation_empirical_TRIM
 
 | Target | Description |
 |--------|-------------|
-| `make all_sequential` | Runs `N` sequential traces and it generates one valid ciphertext|
+| `make sequential` | Runs `N` sequential traces and it generates one valid ciphertext|
 | `make snapshot_parallel` | Runs keygen, saves snapshot for parallel mode and it generates one valid ciphertext |
 | `make decap_parallel` | Runs `N_PARALLEL` decapsulations in parallel (requires snapshot) and also the decapsulation for the valid ciphertext |
-| `make all_parallel` | Runs `snapshot_parallel` then `decap_parallel` |
+| `make parallel` | Runs `snapshot_parallel` then `decap_parallel` |
 | `make snapshot_sample` | Runs keygen, saves snapshot for sample mode and generates one valid ciphertext per run|
 | `make decap_sample` | Runs all sample traces (requires snapshot) and also the decapsulation for the valid ciphertext|
 | `make snapshot_truncated` | Runs keygen, saves snapshot for truncated mode and generates one valid ciphertext per run |
 | `make decap_truncated` | Runs all truncated traces (requires snapshot) and also the decapsulation for the valid ciphertext|
-| `make all_truncated` | Runs `snapshot_sample` then `decap_sample` |
+| `make truncated` | Runs `snapshot_sample` then `decap_sample` |
 | `make snapshot_truncated_empirical` | Runs more keygen, saves snapshot for truncated mode and generates for each key, more ciphertexts|
 | `make decap_truncated_empirical` | Runs all truncated traces (requires snapshot and ciphertexts) and also the decapsulation for the valid ciphertext|
-| `make all_truncated_empirical` | Runs `snapshot_sample` then `decap_sample` |
+| `make truncated_empirical` | Runs `snapshot_sample` then `decap_sample` |
 | `make all` | Runs `all_sequential` `all_parallel` `all_sample` |
 | `make clean_sequential` | Deletes sequential output directories |
 | `make clean_parallel` | Deletes parallel output directories |
