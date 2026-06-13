@@ -1,7 +1,9 @@
 import csv
+import fcntl
 import hashlib
 import os
 import pickle
+import time
 import traceback
 from functools import partial
 
@@ -49,6 +51,38 @@ from TRACE_stop_tracing import SnapshotReady, StopEmulation, hard_stop
 
 def is_truncated_worker_mode(mode):
     return mode in {"truncated", "truncated_empirical"}
+
+
+TIMING_FIELDS = [
+    "phase",
+    "mode",
+    "ciphertext_mode",
+    "run_index",
+    "fault_index",
+    "random_index",
+    "seconds",
+    "emulated_instructions",
+    "total_emulated_instructions",
+]
+
+
+def timing_csv_path(output_dir):
+    return os.path.join(output_dir, "time.csv")
+
+
+def append_timing_row(output_dir, row):
+    path = timing_csv_path(output_dir)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    write_header = not os.path.exists(path) or os.path.getsize(path) == 0
+    with open(path, "a", newline="") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        writer = csv.DictWriter(f, fieldnames=TIMING_FIELDS)
+        if write_header:
+            writer.writeheader()
+        writer.writerow({field: row.get(field) for field in TIMING_FIELDS})
+        f.flush()
+        os.fsync(f.fileno())
+        fcntl.flock(f, fcntl.LOCK_UN)
 
 
 def handle_randombytes_call(ql, namespace, address):
@@ -201,6 +235,12 @@ def reset_trace_state(namespace, *, include_main_flags=False, include_xs=False):
     namespace["valid_ct_from_enc"] = None
     namespace["worker_ct_prepared_at_dec_entry"] = False
     namespace["host_randombytes_enabled"] = False
+    namespace["keygen_start_time"] = None
+    namespace["keygen_start_instr"] = None
+    namespace["encapsulation_start_time"] = None
+    namespace["encapsulation_start_instr"] = None
+    namespace["decapsulation_start_time"] = None
+    namespace["decapsulation_start_instr"] = None
 
     namespace["ins_trace"].clear()
     namespace["reg_trace"].clear()
@@ -259,6 +299,7 @@ def make_snapshot_tracing(ql, address, size, namespace):
     """
     Trace from the beginning until the entry of crypto_kem_dec.
     After encapsulation, save ct_valid 
+    It is used by: parallel, sample, truncated 
     """
     if namespace.get("stop_requested"):
         return
@@ -307,6 +348,26 @@ def make_snapshot_tracing(ql, address, size, namespace):
         namespace["hit_crypto_kem_enc"] = True
         # This is for generating random valid ciphertexts
         namespace["host_randombytes_enabled"] = namespace.get("host_randombytes_for_encapsulation", True)
+        if namespace.get("snapshot_timing_enabled"):
+            # For tracing how much time emulating the instruction takes
+            keygen_end_time = time.perf_counter()
+            keygen_start_time = namespace.get("keygen_start_time")
+            keygen_start_instr = namespace.get("keygen_start_instr")
+            current_instr = namespace.get("instr_counter", 0)
+            label = namespace.get("snapshot_timing_label", "snapshot")
+
+            if keygen_start_time is not None:
+                print(
+                    f"[TIMING] {label}: key generation ended at crypto_kem_enc "
+                    f"after {keygen_end_time - keygen_start_time:.3f}s "
+                    f"and {current_instr - keygen_start_instr} emulated instructions"
+                )
+            else:
+                print(f"[TIMING] {label}: key generation ended at crypto_kem_enc")
+
+            namespace["encapsulation_start_time"] = keygen_end_time
+            namespace["encapsulation_start_instr"] = current_instr
+            print(f"[TIMING] {label}: encapsulation for valid ciphertext generation started")
         print(
             f"crypto_kem_enc() hit during snapshot at {hex(address)}, "
             f"ct ptr = {hex(ql.arch.regs.read('r0'))}"
@@ -348,6 +409,11 @@ def make_snapshot_tracing(ql, address, size, namespace):
         namespace["host_randombytes_enabled"] = namespace.get("host_randombytes_for_keygen", True)
         namespace["address_PK"] = ql.arch.regs.read("r0")
         namespace["address_SK"] = ql.arch.regs.read("r1")
+        if namespace.get("snapshot_timing_enabled"):
+            namespace["keygen_start_time"] = time.perf_counter()
+            namespace["keygen_start_instr"] = namespace.get("instr_counter", 0)
+            label = namespace.get("snapshot_timing_label", "snapshot")
+            print(f"[TIMING] {label}: key generation started at crypto_kem_keypair")
         print("----------------------------")
         print("Entering keypair generation:")
         print("----------------------------")
@@ -369,6 +435,70 @@ def make_snapshot_tracing(ql, address, size, namespace):
             f"crypto_kem_dec() hit during snapshot at {hex(address)}, "
             f"ct ptr = {hex(namespace['address_CT'])}"
         )
+        if namespace.get("snapshot_timing_enabled"):
+            encapsulation_end_time = time.perf_counter()
+            encapsulation_start_time = namespace.get("encapsulation_start_time")
+            encapsulation_start_instr = namespace.get("encapsulation_start_instr")
+            current_instr = namespace.get("instr_counter", 0)
+            label = namespace.get("snapshot_timing_label", "snapshot")
+            keygen_start_time = namespace.get("keygen_start_time")
+            keygen_end_time = namespace.get("encapsulation_start_time")
+            keygen_start_instr = namespace.get("keygen_start_instr")
+            keygen_end_instr = namespace.get("encapsulation_start_instr")
+            keygen_seconds = None
+            keygen_instructions = None
+            encapsulation_seconds = None
+            encapsulation_instructions = None
+
+            if keygen_start_time is not None and keygen_end_time is not None:
+                keygen_seconds = keygen_end_time - keygen_start_time
+            if keygen_start_instr is not None and keygen_end_instr is not None:
+                keygen_instructions = keygen_end_instr - keygen_start_instr
+
+            if encapsulation_start_time is not None:
+                encapsulation_seconds = encapsulation_end_time - encapsulation_start_time
+                encapsulation_instructions = current_instr - encapsulation_start_instr
+                print(
+                    f"[TIMING] {label}: encapsulation ended at crypto_kem_dec "
+                    f"after {encapsulation_seconds:.3f}s "
+                    f"and {encapsulation_instructions} emulated instructions"
+                )
+            else:
+                print(f"[TIMING] {label}: encapsulation ended at crypto_kem_dec")
+            print(f"[TIMING] {label}: valid ciphertext is now available")
+
+            timing_output_dir = namespace.get("global_output_dir") or namespace.get("output_dir")
+            if timing_output_dir:
+                common_timing = {
+                    "mode": namespace.get("snapshot_mode"),
+                    "ciphertext_mode": "valid",
+                    "run_index": namespace.get("current_run_index"),
+                    "fault_index": namespace.get("current_fault_index"),
+                    "random_index": namespace.get("current_random_index"),
+                    "total_emulated_instructions": current_instr,
+                }
+                append_timing_row(timing_output_dir, {
+                    **common_timing,
+                    "phase": "snapshot_key_generation",
+                    "seconds": keygen_seconds,
+                    "emulated_instructions": keygen_instructions,
+                })
+                append_timing_row(timing_output_dir, {
+                    **common_timing,
+                    "phase": "snapshot_encapsulation_valid_ciphertext",
+                    "seconds": encapsulation_seconds,
+                    "emulated_instructions": encapsulation_instructions,
+                })
+                append_timing_row(timing_output_dir, {
+                    **common_timing,
+                    "phase": "snapshot_total_until_decapsulation_entry",
+                    "seconds": (
+                        encapsulation_end_time - keygen_start_time
+                        if keygen_start_time is not None else None
+                    ),
+                    "emulated_instructions": current_instr - keygen_start_instr if keygen_start_instr is not None else None,
+                })
+                print(f"[TIMING] {label}: timing CSV saved to {timing_csv_path(timing_output_dir)}")
         print("Encapsulation complete. Saving valid ciphertext and snapshot at crypto_kem_dec entry.")
 
         save_keys_from_qiling(
@@ -1436,6 +1566,8 @@ def prepare_worker_ciphertext(ql, config, mode):
 
 
 def prepare_ciphertext_at_dec_entry(ql, namespace, mode):
+    ciphertext_prepare_start_time = time.perf_counter()
+    ciphertext_prepare_start_instr = namespace.get("instr_counter", 0)
     run_index = namespace.get("current_run_index")
     fault_index = namespace.get("fault_index") if mode == "parallel" else namespace.get("current_fault_index")
     random_index = namespace.get("current_random_index")
@@ -1501,6 +1633,19 @@ def prepare_ciphertext_at_dec_entry(ql, namespace, mode):
     print(f"[WORKER mode={mode} run={run_index} fault={fault_index}] ciphertext saved to {ct_path}")
     print_ciphertext_summary(label, selected_ct, ct_path)
     save_B_from_ciphertext_csv(selected_ct, b_path)
+    append_timing_row(output_dir, {
+        "phase": "ciphertext_preparation",
+        "mode": mode,
+        "ciphertext_mode": ciphertext_mode,
+        "run_index": run_index,
+        "fault_index": fault_index,
+        "random_index": random_index,
+        "seconds": time.perf_counter() - ciphertext_prepare_start_time,
+        "emulated_instructions": namespace.get("instr_counter", 0) - ciphertext_prepare_start_instr,
+        "total_emulated_instructions": namespace.get("instr_counter", 0),
+    })
+    namespace["decapsulation_start_time"] = time.perf_counter()
+    namespace["decapsulation_start_instr"] = namespace.get("instr_counter", 0)
 
 
 def hook_worker_tracing(ql, namespace, mode):
@@ -1653,10 +1798,25 @@ def run_decapsulation_worker(worker_args, mode):
     ql = load_snapshot_into_worker(namespace, config)
     if not namespace.get("should_prepare_ciphertext_at_dec_entry"):
         namespace["address_CT"] = ql.arch.regs.read("r1")
+        ciphertext_prepare_start_time = time.perf_counter()
+        ciphertext_prepare_start_instr = namespace.get("instr_counter", 0)
         prepare_worker_ciphertext(ql, config, mode)
+        append_timing_row(config["output_dir"], {
+            "phase": "ciphertext_preparation",
+            "mode": mode,
+            "ciphertext_mode": config.get("ciphertext_mode", "modified"),
+            "run_index": config.get("run_index"),
+            "fault_index": config.get("fault_index"),
+            "random_index": config.get("random_index"),
+            "seconds": time.perf_counter() - ciphertext_prepare_start_time,
+            "emulated_instructions": namespace.get("instr_counter", 0) - ciphertext_prepare_start_instr,
+            "total_emulated_instructions": namespace.get("instr_counter", 0),
+        })
     hook_worker_tracing(ql, namespace, mode)
     print_worker_start(config, namespace, mode)
 
+    decapsulation_start_time = time.perf_counter()
+    decapsulation_start_instr = namespace.get("instr_counter", 0)
     try:
         ql.run()
     except StopEmulation as e:
@@ -1669,6 +1829,18 @@ def run_decapsulation_worker(worker_args, mode):
         else:
             print(f"Error during decapsulation (run={run_index + 1} fault={fault_index}): {e}")
         traceback.print_exc()
+
+    append_timing_row(config["output_dir"], {
+        "phase": "decapsulation_trace",
+        "mode": mode,
+        "ciphertext_mode": config.get("ciphertext_mode", "modified"),
+        "run_index": config.get("run_index"),
+        "fault_index": config.get("fault_index"),
+        "random_index": config.get("random_index"),
+        "seconds": time.perf_counter() - namespace.get("decapsulation_start_time", decapsulation_start_time),
+        "emulated_instructions": namespace.get("instr_counter", 0) - namespace.get("decapsulation_start_instr", decapsulation_start_instr),
+        "total_emulated_instructions": namespace.get("instr_counter", 0),
+    })
 
     if is_truncated_worker_mode(mode):
         save_and_check_B_from_registers_from_traces(

@@ -31,8 +31,8 @@ CIPHERTEXT_MODE_SAMPLE = modified
 NUM_RUNS_TRUNCATED        = 80
 FAULT_INDICES_TRUNCATED   = $(shell $(PYTHON) -c "print(' '.join(str(i) for i in range(0, 321, 2)))")
 JOBS_TRUNCATED            = 10
-OUTPUT_DIR_TRUNCATED      = output_decapsulation_truncated
-OUTPUT_DIR_TRUNCATED_TRIM = output_decapsulation_truncated_TRIM
+OUTPUT_DIR_TRUNCATED      = output_decapsulation_truncated_time
+OUTPUT_DIR_TRUNCATED_TRIM = output_decapsulation_truncated_TRIM_time
 CIPHERTEXT_MODE_TRUNCATED = modified
 
 # Empirical comparison: one folder containing valid and altered traces for more S 
@@ -54,7 +54,7 @@ INDICES := $(shell $(PYTHON) -c "print(' '.join(str(i) for i in range($(N))))")
         snapshot_parallel decap_parallel \
         snapshot_sample decap_sample \
 		snapshot_truncated decap_truncated \
-		truncated_empirical \
+		snapshot_truncated_empirical decap_truncated_empirical truncated_empirical \
         clean clean_parallel clean_sample clean_sequential clean_truncated clean_truncated_empirical
 
 # running sequential
@@ -181,6 +181,10 @@ snapshot_truncated:
 		--output-dir-trim $(OUTPUT_DIR_TRUNCATED_TRIM) \
 		$(HOST_RANDOMBYTES_FLAG) \
 		> $(OUTPUT_DIR_TRUNCATED)/keygen_snapshot_log.txt 2>&1
+	@if [ -f $(OUTPUT_DIR_TRUNCATED)/time.csv ]; then \
+		echo "Snapshot timing summary:"; \
+		awk -F, 'NR == 1 || $$1 ~ /^snapshot_/' $(OUTPUT_DIR_TRUNCATED)/time.csv; \
+	fi
 	@echo "Snapshot done"
 
 decap_truncated:
@@ -210,8 +214,8 @@ truncated:
 	@echo "Truncated run ended at $$(date)."
 
 
-truncated_empirical:
-	@echo "Truncated empirical run started... $$(date)"
+snapshot_truncated_empirical:
+	@echo "Running empirical keygen snapshots... $$(date)"
 	@mkdir -p $(OUTPUT_DIR_TRUNCATED_EMPIRICAL) $(OUTPUT_DIR_TRUNCATED_EMPIRICAL_TRIM)
 	@$(PYTHON) $(SCRIPT_TRUNCATED_EMPIRICAL) \
 		--elf-file $(ELF_FILE) \
@@ -222,8 +226,32 @@ truncated_empirical:
 		--output-dir $(OUTPUT_DIR_TRUNCATED_EMPIRICAL) \
 		--output-dir-trim $(OUTPUT_DIR_TRUNCATED_EMPIRICAL_TRIM) \
 		--ciphertext-mode empirical \
+		--snapshot-only \
+		$(HOST_RANDOMBYTES_FLAG) \
+		> $(OUTPUT_DIR_TRUNCATED_EMPIRICAL)/keygen_snapshot_log.txt 2>&1
+	@echo "Empirical snapshots done"
+
+decap_truncated_empirical:
+	@echo "Running empirical valid and altered decapsulation traces... $$(date)"
+	@mkdir -p $(OUTPUT_DIR_TRUNCATED_EMPIRICAL) $(OUTPUT_DIR_TRUNCATED_EMPIRICAL_TRIM)
+	@$(PYTHON) $(SCRIPT_TRUNCATED_EMPIRICAL) \
+		--elf-file $(ELF_FILE) \
+		--num-runs $(NUM_RUNS_TRUNCATED_EMPIRICAL) \
+		--num-random-ciphertexts $(NUM_RANDOM_CIPHERTEXTS_TRUNCATED_EMPIRICAL) \
+		--fault-indices $(FAULT_INDICES_TRUNCATED_EMPIRICAL) \
+		--jobs $(JOBS_TRUNCATED_EMPIRICAL) \
+		--output-dir $(OUTPUT_DIR_TRUNCATED_EMPIRICAL) \
+		--output-dir-trim $(OUTPUT_DIR_TRUNCATED_EMPIRICAL_TRIM) \
+		--ciphertext-mode empirical \
+		--skip-snapshot \
 		$(HOST_RANDOMBYTES_FLAG) \
 		> $(OUTPUT_DIR_TRUNCATED_EMPIRICAL)/output_truncated_empirical.txt 2>&1
+	@echo "Empirical decapsulation traces done"
+
+truncated_empirical:
+	@echo "Truncated empirical run started... $$(date)"
+	@$(MAKE) snapshot_truncated_empirical
+	@$(MAKE) decap_truncated_empirical
 	@echo "Truncated empirical run ended — see $(OUTPUT_DIR_TRUNCATED_EMPIRICAL) and $(OUTPUT_DIR_TRUNCATED_EMPIRICAL_TRIM) $$(date)"
 
 

@@ -57,7 +57,7 @@ def green_red_map(higher_is_better=True):
     return map
 
 
-def plot_heatmap(values_df, title, save_path, x_label="pair index / fault index", y_label="xs_id", colorbar_label="value", higher_is_better=True, vmin=None, vmax=None, annotate=False, annotation_format="{:.0%}", show_row_success=False, success_value=1, x_tick_labels=None, y_tick_labels=None, summary_label="Value summary"):
+def plot_heatmap(values_df, title, save_path, x_label="pair index / fault index", y_label="xs_id", colorbar_label="value", higher_is_better=True, vmin=None, vmax=None, norm=None, annotate=False, annotation_format="{:.0%}", show_row_success=False, success_value=1, x_tick_labels=None, y_tick_labels=None, summary_label="Value summary"):
     values_df = values_df.astype(float)
     values_matrix = values_df.to_numpy()
     masked_values = np.ma.masked_invalid(values_matrix)
@@ -78,10 +78,18 @@ def plot_heatmap(values_df, title, save_path, x_label="pair index / fault index"
     if vmin == vmax:
         vmax = vmin + 1
 
-    im = ax.imshow(masked_values, aspect="auto", interpolation="nearest", map=green_red_map(higher_is_better=higher_is_better),
-        vmin=vmin,
-        vmax=vmax,
-    )
+    imshow_kwargs = {
+        "aspect": "auto",
+        "interpolation": "nearest",
+        "cmap": green_red_map(higher_is_better=higher_is_better),
+    }
+    if norm is None:
+        imshow_kwargs["vmin"] = vmin
+        imshow_kwargs["vmax"] = vmax
+    else:
+        imshow_kwargs["norm"] = norm
+
+    im = ax.imshow(masked_values, **imshow_kwargs)
 
     ax.set_title(title)
     ax.set_xlabel(x_label)
@@ -127,23 +135,25 @@ def plot_heatmap(values_df, title, save_path, x_label="pair index / fault index"
     return save_path
 
 
-def plot_rank_heatmap(rank_df, title, save_path, x_label="pair index / fault index", show_success=True):
+def plot_rank_heatmap(rank_df, title, save_path, x_label="pair index / fault index", show_success=True, vmax=None):
     """
     Plot a rank matrix as a heatmap. Rows are xs_id values and columns are S-pair indices 
     """
     rank_df = rank_df.astype(float)
-    vmax = np.nanmax(rank_df.to_numpy())
-    if not np.isfinite(vmax) or vmax < 1:
-        vmax = 1
+    if vmax is None:
+        vmax = np.nanmax(rank_df.to_numpy())
+        if not np.isfinite(vmax) or vmax < 1:
+            vmax = 1
     return plot_heatmap(
         rank_df,
         title=title,
         save_path=save_path,
         x_label=x_label,
-        colorbar_label="rank (1 = best)",
+        colorbar_label="rank (1 = best, log scale)",
         higher_is_better=False,
         vmin=1,
         vmax=max(2, vmax),
+        norm=LogNorm(vmin=1, vmax=max(2, vmax)),
         show_row_success=show_success,
         success_value=1,
         summary_label="Rank summary",
@@ -325,12 +335,12 @@ def plot_success_heatmaps(
     return saved_paths
 
 
-def plot_secret_pair_abs_heatmap(S_matrix, title, save_path, pair_indices=None, x_label="pair index / fault index"):
+def plot_secret_pair_abs_heatmap(S_matrix, title, save_path, pair_indices=None, x_label="pair index / fault index", total_pairs=None):
     """
     Plot max(abs(S0), abs(S1)) using the shared green-to-red heatmap scale.
     """
     S_matrix = np.asarray(S_matrix)
-    no_pairs_total = S_matrix.shape[0] // 2
+    no_pairs_total = S_matrix.shape[0] // 2 if total_pairs is None else int(total_pairs)
     pair_values = np.full((S_matrix.shape[1], no_pairs_total), np.nan, dtype=float)
 
     selected_pairs = range(no_pairs_total) if pair_indices is None else pair_indices
@@ -353,11 +363,44 @@ def plot_secret_pair_abs_heatmap(S_matrix, title, save_path, pair_indices=None, 
         title=title,
         save_path=save_path,
         x_label=x_label,
-        colorbar_label="max(|S0|, |S1|), grey = not guessed",
+        colorbar_label="max(|S0|, |S1|), grey = not evaluated",
         higher_is_better=False,
         vmin=0,
         vmax=10,
         summary_label="Secret-pair absolute-value summary",
+    )
+
+
+def plot_secret_abs_heatmap(S_matrix, title, save_path, S_indices=None, x_label="xs_id"):
+    """
+    Plot abs(S) with one row per S index and one column per xs_id.
+    Unselected S rows remain NaN and are shown in grey.
+    """
+    S_matrix = np.asarray(S_matrix)
+    S_values = np.full(S_matrix.shape, np.nan, dtype=float)
+
+    selected_indices = range(S_matrix.shape[0]) if S_indices is None else S_indices
+    for S_idx in selected_indices:
+        S_idx = int(S_idx)
+        if 0 <= S_idx < S_matrix.shape[0]:
+            S_values[S_idx, :] = np.abs(S_matrix[S_idx, :])
+
+    S_values_df = pd.DataFrame(
+        S_values,
+        index=[f"S_{S_idx}" for S_idx in range(S_matrix.shape[0])],
+        columns=[f"xs_{xs_id}" for xs_id in range(S_matrix.shape[1])],
+    )
+    return plot_heatmap(
+        S_values_df,
+        title=title,
+        save_path=save_path,
+        x_label=x_label,
+        y_label="S index",
+        colorbar_label="|S|, grey = not guessed",
+        higher_is_better=False,
+        vmin=0,
+        vmax=10,
+        summary_label="Secret absolute-value summary",
     )
 
 
@@ -387,7 +430,7 @@ def plot_single_S_grid_summary(
             .sort_index(axis=1)
         )
         masked_values = np.ma.masked_invalid(grid_df.to_numpy(dtype=float))
-        im = ax.imshow(masked_values, aspect="auto", interpolation="nearest", vmin=0, vmax=1, map=green_red_map(higher_is_better=True))
+        im = ax.imshow(masked_values, aspect="auto", interpolation="nearest", vmin=0, vmax=1, cmap=green_red_map(higher_is_better=True))
         ax.set_title(attack)
         ax.set_xlabel("number of guessed pairs")
         ax.set_ylabel("traces")
@@ -411,6 +454,52 @@ def plot_single_S_grid_summary(
     plt.show()
     print(f"Saved single-S grid plot to {save_path}")
     return save_path
+
+
+def plot_single_S_grid_summary_by_attack(
+    summary_df,
+    result_dir,
+    attack_column="attack",
+    trace_count_column="trace_count",
+    pair_count_column="pair_count",
+    success_column="success_rate",
+):
+    if pair_count_column not in summary_df.columns and "fault_limit" in summary_df.columns:
+        summary_df = summary_df.copy()
+        summary_df[pair_count_column] = summary_df["fault_limit"] // 2
+
+    result_dir = Path(result_dir)
+    result_dir.mkdir(parents=True, exist_ok=True)
+    saved_paths = []
+
+    for attack in summary_df[attack_column].drop_duplicates():
+        attack_df = summary_df[summary_df[attack_column] == attack]
+        grid_df = (
+            attack_df
+            .pivot(index=trace_count_column, columns=pair_count_column, values=success_column)
+            .sort_index()
+            .sort_index(axis=1)
+        )
+
+        save_path = result_dir / f"S_success_rate_{attack}.png"
+        saved_paths.append(plot_heatmap(
+            grid_df,
+            title=f"{attack} success rate",
+            save_path=save_path,
+            x_label="number of guessed pairs",
+            y_label="number of traces",
+            colorbar_label="success rate",
+            higher_is_better=True,
+            vmin=0,
+            vmax=1,
+            annotate=True,
+            annotation_format="{:.0%}",
+            x_tick_labels=[str(col) for col in grid_df.columns],
+            y_tick_labels=[str(idx) for idx in grid_df.index],
+            summary_label=f"{attack} success-rate summary",
+        ))
+
+    return saved_paths
 
 
 def plot_single_S_secret_heatmaps( S_matrix, result_dir, fault_limits, title_template="S heatmap for fault indices < {fault_limit}", filename_template="S_heatmap_fault_limit_{fault_limit}.png"):
