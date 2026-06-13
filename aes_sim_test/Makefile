@@ -28,14 +28,14 @@ OUTPUT_DIR_SAMPLE_TRIM = output_decapsulation_sample_TRIM
 CIPHERTEXT_MODE_SAMPLE = modified
 
 # Truncated 
-NUM_RUNS_TRUNCATED        = 80
-FAULT_INDICES_TRUNCATED   = $(shell $(PYTHON) -c "print(' '.join(str(i) for i in range(0, 321, 2)))")
+NUM_RUNS_TRUNCATED        = 10
+FAULT_INDICES_TRUNCATED   = $(shell $(PYTHON) -c "print(' '.join(str(i) for i in range(0, 33, 2)))")
 JOBS_TRUNCATED            = 10
-OUTPUT_DIR_TRUNCATED      = output_decapsulation_truncated_time
-OUTPUT_DIR_TRUNCATED_TRIM = output_decapsulation_truncated_TRIM_time
+OUTPUT_DIR_TRUNCATED      = output_decapsulation_truncated
+OUTPUT_DIR_TRUNCATED_TRIM = output_decapsulation_truncated_TRIM
 CIPHERTEXT_MODE_TRUNCATED = modified
 
-# Empirical comparison: one folder containing valid and altered traces for more S 
+# Empirical 
 NUM_RUNS_TRUNCATED_EMPIRICAL        = 4
 NUM_RANDOM_CIPHERTEXTS_TRUNCATED_EMPIRICAL = 80
 FAULT_INDICES_TRUNCATED_EMPIRICAL   = $(shell $(PYTHON) -c "print(' '.join(str(i) for i in range(0, 321, 2)))")
@@ -181,10 +181,10 @@ snapshot_truncated:
 		--output-dir-trim $(OUTPUT_DIR_TRUNCATED_TRIM) \
 		$(HOST_RANDOMBYTES_FLAG) \
 		> $(OUTPUT_DIR_TRUNCATED)/keygen_snapshot_log.txt 2>&1
-	@if [ -f $(OUTPUT_DIR_TRUNCATED)/time.csv ]; then \
-		echo "Snapshot timing summary:"; \
-		awk -F, 'NR == 1 || $$1 ~ /^snapshot_/' $(OUTPUT_DIR_TRUNCATED)/time.csv; \
-	fi
+	# @if [ -f $(OUTPUT_DIR_TRUNCATED)/time.csv ]; then \
+	# 	echo "Snapshot timing summary:"; \
+	# 	awk -F, 'NR == 1 || $$1 ~ /^snapshot_/' $(OUTPUT_DIR_TRUNCATED)/time.csv; \
+	# fi
 	@echo "Snapshot done"
 
 decap_truncated:

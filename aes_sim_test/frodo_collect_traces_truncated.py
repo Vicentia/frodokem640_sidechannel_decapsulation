@@ -143,8 +143,8 @@ def run_truncated_snapshot_worker(worker_args):
         "host_randombytes_for_keygen": False,
         "host_randombytes_for_encapsulation": True,
         "snapshot_progress_interval": 100_000,
-        "snapshot_timing_enabled": True,
-        "snapshot_timing_label": f"truncated run {run_index}",
+        # "snapshot_timing_enabled": True,
+        # "snapshot_timing_label": f"truncated run {run_index}",
         "current_run_index": run_index,
         "current_fault_index": 0,
         "ins_trace": [],
@@ -347,8 +347,8 @@ def main():
             print(f"[ERROR] Missing sk.bin, cannot refresh S/S.csv: {sk_path}")
 
     else:
-        open(os.path.join(output_dir, "time.csv"), "w").close()
-        print(f"[TIMING] Reset timing CSV at {os.path.join(output_dir, 'time.csv')}")
+        # open(os.path.join(output_dir, "time.csv"), "w").close()
+        # print(f"[TIMING] Reset timing CSV at {os.path.join(output_dir, 'time.csv')}")
         print("------------------------------")
         print(f"Creating {num_runs} per-run snapshots with {jobs} worker(s)")
         print("------------------------------")
