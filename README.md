@@ -406,7 +406,7 @@ All plots are saved to the relevant results directory (e.g. `Results_decapsulati
 | `heatmap_rank_combine_same_hw.png` | The rank heatmaps for a combined attack with HW |
 
 
-**Modes** - there are 4 modes for analysis: sequantial, parallel, sample, truncated, truncated empirical (valid vs altered notebook) and each of them have their dedicated notebook
+**Modes** - there are 5 modes for analysis: sequantial, parallel, sample, truncated, truncated empirical (valid vs altered notebook) and each of them have their dedicated notebook
 
 
 | Notebook name | What it shows |
